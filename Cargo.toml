@@ -1,0 +1,20 @@
+[package]
+name = "rust_game"
+version = "0.1.0"
+edition = "2021"
+
+# Enable a small amount of optimization in debug mode
+[profile.dev]
+opt-level = 1
+
+
+# Enable high optimizations for dependencies (incl. Bevy), but not for our code:
+[profile.dev.package."*"]
+opt-level = 3
+
+[dependencies]
+bevy = {version = "0.9.1", features = ["dynamic"]}
+bracket-noise = "0.8.7"
+bevy-inspector-egui = "0.14.0"
+itertools = "0.10.5"
+noise = "0.8.2"
