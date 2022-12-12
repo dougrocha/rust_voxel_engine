@@ -17,15 +17,15 @@ pub struct MouseState {
 
 #[derive(Resource)]
 pub struct MovementSettings {
-    mouse_sensitivity: f32,
-    walk_speed: f32,
-    run_speed: f32,
-    friction: f32,
-    gravity: f32,
-    jump_height: f32,
-    max_velocity: f32,
+    pub mouse_sensitivity: f32,
+    pub walk_speed: f32,
+    pub run_speed: f32,
+    pub friction: f32,
+    pub gravity: f32,
+    pub jump_height: f32,
+    pub max_velocity: f32,
 
-    position: Vec3,
+    pub position: Vec3,
 }
 
 pub struct PlayerPlugin;
@@ -59,7 +59,7 @@ impl Default for MovementSettings {
 fn setup_player(mut commands: Commands) {
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_xyz(-2.0, 5.0, 5.0),
+            transform: Transform::from_xyz(0.0, 0.0, 6.0),
             ..Default::default()
         },
         FpsCameraComponent,

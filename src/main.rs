@@ -1,19 +1,23 @@
 use bevy::{
-    core::{Pod, Zeroable},
     diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
-    pbr::wireframe::WireframePlugin,
+    pbr::wireframe::{Wireframe, WireframePlugin},
     prelude::*,
-    render::{
-        mesh::{Indices, VertexAttributeValues},
-        render_resource::{PrimitiveTopology, VertexAttribute},
-    },
+    render::{mesh::Indices, render_resource::PrimitiveTopology},
 };
 
 use bevy_inspector_egui::WorldInspectorPlugin;
 
 use rust_game::{
-    player::PlayerPlugin,
-    world::voxel_data::{FACES, NORMALS, VERTICES},
+    player::{MovementSettings, PlayerPlugin},
+    world::{
+        block::BlockPosition,
+        chunk::{
+            self,
+            chunk_manager::{ChunkConfig, ChunkManager},
+            chunks::{ChunkPosition, Direction, CHUNK_SIZE},
+        },
+        voxel_data::{FACES, FACE_ORDER, VERTICES},
+    },
 };
 
 const CLEAR_COLOR: Color = Color::rgb(0.4, 0.4, 0.4);
@@ -35,17 +39,20 @@ fn main() {
             },
             ..default()
         }))
+        .insert_resource(MovementSettings {
+            walk_speed: 30.0,
+            ..default()
+        })
         .add_plugin(WorldInspectorPlugin::new())
         .add_plugin(LogDiagnosticsPlugin::default())
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
         .add_plugin(EntityCountDiagnosticsPlugin::default())
-        .add_plugin(WireframePlugin::default())
+        .add_plugin(WireframePlugin)
         // Game State
         .add_state(AppState::InGame)
         .add_plugin(PlayerPlugin)
         .add_startup_system(setup_light)
-        .add_startup_system(load_scene)
-        .add_startup_system(load_world)
+        .add_startup_system(setup_scene)
         .run();
 }
 
@@ -56,7 +63,7 @@ fn setup_light(mut commands: Commands) {
         color: Color::rgb(0.2, 0.2, 0.2),
         brightness: 0.5,
     });
-
+    // point light
     commands.spawn(PointLightBundle {
         point_light: PointLight {
             intensity: 1500.0,
@@ -68,250 +75,194 @@ fn setup_light(mut commands: Commands) {
     });
 }
 
-fn load_scene(
+// pub const FACES: [[usize; 4]; 6] = [
+//     // top
+//     [7, 6, 2, 3],
+//     // bottom
+//     [0, 1, 5, 4],
+//     // front
+//     [4, 5, 6, 7],
+//     // back
+//     [1, 0, 3, 2],
+//     // left
+//     [0, 4, 7, 3],
+//     // right
+//     [5, 1, 2, 6],
+// ];
+
+// pub const VERTICES: [[f32; 3]; 8] = [
+//     [0.0, 0.0, 0.0], // 0
+//     [1.0, 0.0, 0.0], // 1
+//     [1.0, 1.0, 0.0], // 2
+//     [0.0, 1.0, 0.0], // 3
+//     [0.0, 0.0, 1.0], // 4
+//     [1.0, 0.0, 1.0], // 5
+//     [1.0, 1.0, 1.0], // 6
+//     [0.0, 1.0, 1.0], // 7
+// ];
+
+// pub const FACE_ORDER: [u32; 6] = [0, 1, 2, 0, 2, 3];
+
+fn setup_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Plane { size: 10.0 })),
-        material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
-        ..Default::default()
-    });
-}
+    // let mut cube = Mesh::new(PrimitiveTopology::TriangleList);
 
-fn load_world(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let mesh = create_block_cube();
+    // let mut vertices: Vec<[f32; 3]> = Vec::new();
+    // let mut indices: Vec<u32> = Vec::new();
 
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(mesh),
-        material: materials.add(StandardMaterial {
-            base_color: Color::rgb(0.8, 0.7, 0.6),
+    // let mut vertex_count = 0;
+
+    // render 3x3x1 plane of cubes
+    // for x in 0..16 {
+    //     for y in 0..16 {
+    //         for z in 0..16 {
+    //             for face in FACES {
+    //                 for index in face.iter() {
+    //                     vertices.push([
+    //                         VERTICES[*index][0] + x as f32,
+    //                         VERTICES[*index][1] + y as f32,
+    //                         VERTICES[*index][2] + z as f32,
+    //                     ]);
+
+    //                     for index in 0..6 {
+    //                         indices.push(vertex_count + FACE_ORDER[index]);
+    //                     }
+    //                 }
+
+    //                 // indices.push(vertex_count);
+    //                 // indices.push(vertex_count + 1);
+    //                 // indices.push(vertex_count + 2);
+    //                 // indices.push(vertex_count);
+    //                 // indices.push(vertex_count + 2);
+    //                 // indices.push(vertex_count + 3);
+
+    //                 vertex_count += 4;
+    //             }
+    //         }
+    //     }
+    // }
+
+    // cube.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices);
+
+    // cube.set_indices(Some(Indices::U32(indices)));
+
+    // commands.spawn((
+    //     PbrBundle {
+    //         mesh: meshes.add(cube),
+    //         material: materials.add(StandardMaterial {
+    //             base_color: Color::RED,
+    //             cull_mode: None,
+    //             ..Default::default()
+    //         }),
+    //         ..Default::default()
+    //     },
+    //     Wireframe,
+    // ));
+
+    // chunk manager
+    let mut chunk_manager = ChunkManager::new(ChunkConfig::default());
+
+    let position = ChunkPosition::new(0, 0);
+    let position2 = ChunkPosition::new(1, 0);
+    let position3 = ChunkPosition::new(2, 0);
+
+    chunk_manager.generate_chunk(position);
+    chunk_manager.generate_chunk(position2);
+    chunk_manager.generate_chunk(position3);
+
+    let mesh = chunk_manager.get_chunk(position).unwrap().mesh.clone();
+    let mesh2 = chunk_manager.get_chunk(position2).unwrap().mesh.clone();
+    let mesh3 = chunk_manager.get_chunk(position3).unwrap().mesh.clone();
+
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(mesh),
+            material: materials.add(StandardMaterial {
+                base_color: Color::RED,
+                ..Default::default()
+            }),
             ..Default::default()
-        }),
-        transform: Transform::from_xyz(2.0, 0.2, 0.0),
-        ..Default::default()
-    });
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
-        material: materials.add(StandardMaterial {
-            base_color: Color::rgb(0.8, 0.7, 0.6),
+        },
+        Wireframe,
+    ));
+
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(mesh2),
+            material: materials.add(StandardMaterial {
+                base_color: Color::RED,
+                ..Default::default()
+            }),
             ..Default::default()
-        }),
-        transform: Transform::from_xyz(0.0, 0.2, 0.0),
-        ..Default::default()
-    });
+        },
+        Wireframe,
+    ));
+
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(mesh3),
+            material: materials.add(StandardMaterial {
+                base_color: Color::RED,
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        Wireframe,
+    ));
+
+    // load a chunk 16 x 16 x 16
+
+    // let mut chunk = Chunk::new(ChunkPosition::new(0, 0, 0));
+
+    // chunk.update_mesh();
+
+    // commands.spawn((
+    //     PbrBundle {
+    //         mesh: meshes.add(chunk.mesh),
+    //         material: materials.add(StandardMaterial {
+    //             base_color: Color::RED,
+    //             ..Default::default()
+    //         }),
+    //         ..Default::default()
+    //     },
+    //     Wireframe,
+    // ));
 }
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug)]
-struct Vertex {
-    position: [f32; 3],
-    // color: [f32; 4],
-}
+// fn load_block_material(
+//     asset_server: &Res<AssetServer>,
+//     materials: &mut ResMut<Assets<StandardMaterial>>,
+//     asset_path: &str,
+// ) -> Handle<StandardMaterial> {
+//     let image_handle = asset_server.load(asset_path);
+//     let material_handle = materials.add(StandardMaterial {
+//         base_color_texture: Some(image_handle.clone()),
+//         alpha_mode: AlphaMode::Opaque,
+//         unlit: true,
+//         ..default()
+//     });
+//     material_handle
+// }
 
-fn create_block_cube() -> Mesh {
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+// fn setup_floor(
+//     mut commands: Commands,
+//     asset_server: Res<AssetServer>,
+//     mut meshes: ResMut<Assets<Mesh>>,
+//     mut materials: ResMut<Assets<StandardMaterial>>,
+// ) {
+//     let sandstone_material = load_block_material(&asset_server, &mut materials, "sand.png");
 
-    let positions = cube_positions();
-    let colors = cube_colors();
-    let normals = cube_normals();
-
-    let mut vertices = Vec::new();
-    for i in 0..positions.len() {
-        vertices.push(Vertex {
-            position: [
-                positions[i][0] as f32,
-                positions[i][1] as f32,
-                positions[i][2] as f32,
-            ],
-            // color: [
-            //     colors[i][0] as f32,
-            //     colors[i][1] as f32,
-            //     colors[i][2] as f32,
-            //     1.0,
-            // ],
-        });
-    }
-
-    mesh.insert_attribute(
-        Mesh::ATTRIBUTE_POSITION,
-        VertexAttributeValues::Float32x3(
-            vertices
-                .iter()
-                .map(|v| v.position)
-                .collect::<Vec<[f32; 3]>>(),
-        ),
-    );
-
-    // mesh.insert_attribute(
-    //     Mesh::ATTRIBUTE_COLOR,
-    //     VertexAttributeValues::Float32x4(
-    //         vertices.iter().map(|v| v.color).collect::<Vec<[f32; 4]>>(),
-    //     ),
-    // );
-
-    mesh.insert_attribute(
-        Mesh::ATTRIBUTE_NORMAL,
-        VertexAttributeValues::Float32x3(
-            normals
-                .iter()
-                .map(|v| [v[0] as f32, v[1] as f32, v[2] as f32])
-                .collect::<Vec<[f32; 3]>>(),
-        ),
-    );
-
-    mesh.set_indices(Some(Indices::U32(
-        (0..positions.len() as u32).collect::<Vec<u32>>(),
-    )));
-
-    mesh
-}
-
-pub fn cube_positions() -> Vec<[i8; 3]> {
-    [
-        // front (0, 0, 1)
-        [-1, -1, 1],
-        [1, -1, 1],
-        [-1, 1, 1],
-        [-1, 1, 1],
-        [1, -1, 1],
-        [1, 1, 1],
-        // right (1, 0, 0)
-        [1, -1, 1],
-        [1, -1, -1],
-        [1, 1, 1],
-        [1, 1, 1],
-        [1, -1, -1],
-        [1, 1, -1],
-        // back (0, 0, -1)
-        [1, -1, -1],
-        [-1, -1, -1],
-        [1, 1, -1],
-        [1, 1, -1],
-        [-1, -1, -1],
-        [-1, 1, -1],
-        // left (-1, 0, 0)
-        [-1, -1, -1],
-        [-1, -1, 1],
-        [-1, 1, -1],
-        [-1, 1, -1],
-        [-1, -1, 1],
-        [-1, 1, 1],
-        // top (0, 1, 0)
-        [-1, 1, 1],
-        [1, 1, 1],
-        [-1, 1, -1],
-        [-1, 1, -1],
-        [1, 1, 1],
-        [1, 1, -1],
-        // bottom (0, -1, 0)
-        [-1, -1, -1],
-        [1, -1, -1],
-        [-1, -1, 1],
-        [-1, -1, 1],
-        [1, -1, -1],
-        [1, -1, 1],
-    ]
-    .to_vec()
-}
-
-pub fn cube_colors() -> Vec<[i8; 3]> {
-    [
-        // front - blue
-        [0, 0, 1],
-        [0, 0, 1],
-        [0, 0, 1],
-        [0, 0, 1],
-        [0, 0, 1],
-        [0, 0, 1],
-        // right - red
-        [1, 0, 0],
-        [1, 0, 0],
-        [1, 0, 0],
-        [1, 0, 0],
-        [1, 0, 0],
-        [1, 0, 0],
-        // back - yellow
-        [1, 1, 0],
-        [1, 1, 0],
-        [1, 1, 0],
-        [1, 1, 0],
-        [1, 1, 0],
-        [1, 1, 0],
-        // left - aqua
-        [0, 1, 1],
-        [0, 1, 1],
-        [0, 1, 1],
-        [0, 1, 1],
-        [0, 1, 1],
-        [0, 1, 1],
-        // top - green
-        [0, 1, 0],
-        [0, 1, 0],
-        [0, 1, 0],
-        [0, 1, 0],
-        [0, 1, 0],
-        [0, 1, 0],
-        // bottom - fuchsia
-        [1, 0, 1],
-        [1, 0, 1],
-        [1, 0, 1],
-        [1, 0, 1],
-        [1, 0, 1],
-        [1, 0, 1],
-    ]
-    .to_vec()
-}
-
-fn cube_normals() -> Vec<[i8; 3]> {
-    [
-        // front
-        [0, 0, 1],
-        [0, 0, 1],
-        [0, 0, 1],
-        [0, 0, 1],
-        [0, 0, 1],
-        [0, 0, 1],
-        // right
-        [1, 0, 0],
-        [1, 0, 0],
-        [1, 0, 0],
-        [1, 0, 0],
-        [1, 0, 0],
-        [1, 0, 0],
-        // back
-        [0, 0, -1],
-        [0, 0, -1],
-        [0, 0, -1],
-        [0, 0, -1],
-        [0, 0, -1],
-        [0, 0, -1],
-        // left
-        [-1, 0, 0],
-        [-1, 0, 0],
-        [-1, 0, 0],
-        [-1, 0, 0],
-        [-1, 0, 0],
-        [-1, 0, 0],
-        // top
-        [0, 1, 0],
-        [0, 1, 0],
-        [0, 1, 0],
-        [0, 1, 0],
-        [0, 1, 0],
-        [0, 1, 0],
-        // bottom
-        [0, -1, 0],
-        [0, -1, 0],
-        [0, -1, 0],
-        [0, -1, 0],
-        [0, -1, 0],
-        [0, -1, 0],
-    ]
-    .to_vec()
-}
+//     for x in 0..16 {
+//         for z in 0..16 {
+//             commands.spawn(PbrBundle {
+//                 mesh: meshes.add(Mesh::from(shape::Plane { size: 1.0 / 16.0 })),
+//                 material: sandstone_material.clone(),
+//                 transform: Transform::from_xyz(x as f32 / 16., 0.0, z as f32 / 16.),
+//                 ..default()
+//             });
+//         }
+//     }
+// }
