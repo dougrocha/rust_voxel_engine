@@ -56,10 +56,10 @@ impl Default for MovementSettings {
     }
 }
 
-fn setup_player(mut commands: Commands) {
+fn setup_player(mut commands: Commands, movement_settings: Res<MovementSettings>) {
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_xyz(0.0, 0.0, 6.0),
+            transform: Transform::from_translation(movement_settings.position),
             ..Default::default()
         },
         FpsCameraComponent,

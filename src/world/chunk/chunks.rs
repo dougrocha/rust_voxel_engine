@@ -1,4 +1,5 @@
 use bevy::{
+    pbr::wireframe::Wireframe,
     prelude::*,
     render::{mesh::Indices, render_resource::PrimitiveTopology},
 };
@@ -9,8 +10,8 @@ use crate::world::{
     voxel_data::{FACES, FACE_ORDER, NORMALS, UVS, VERTICES},
 };
 
-pub const CHUNK_SIZE: i32 = 16;
-pub const CHUNK_HEIGHT: i32 = 256;
+pub const CHUNK_SIZE: i32 = 32;
+pub const CHUNK_HEIGHT: i32 = 32;
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
 pub struct ChunkPosition {
@@ -35,6 +36,18 @@ impl ChunkArray {
             CHUNK_HEIGHT as usize]; CHUNK_SIZE as usize];
 
         ChunkArray { blocks }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct FMask {
+    pub block_type: BlockType,
+    pub normal: i8,
+}
+
+impl FMask {
+    pub fn new(block_type: BlockType, normal: i8) -> FMask {
+        FMask { block_type, normal }
     }
 }
 
@@ -72,6 +85,36 @@ impl Chunk {
         }
     }
 
+    pub fn render(
+        &mut self,
+        commands: &mut Commands,
+        materials: &mut ResMut<Assets<StandardMaterial>>,
+        meshes: &mut ResMut<Assets<Mesh>>,
+    ) {
+        // self.generate_greedy_mesh();
+        self.generate_mesh();
+
+        self.apply_mesh();
+
+        commands.spawn((
+            PbrBundle {
+                mesh: meshes.add(self.mesh.clone()),
+                material: materials.add(StandardMaterial {
+                    base_color: Color::rgb(0.5, 0.5, 0.5),
+                    ..Default::default()
+                }),
+                transform: Transform::from_translation(Vec3::new(
+                    self.position.x as f32 * CHUNK_SIZE as f32,
+                    0.0,
+                    self.position.z as f32 * CHUNK_SIZE as f32,
+                )),
+                ..Default::default()
+            },
+            // Only render the wireframe of the mesh for testing purposes
+            Wireframe,
+        ));
+    }
+
     pub fn generate_blocks(&mut self) {
         for x in 0..CHUNK_SIZE {
             for z in 0..CHUNK_SIZE {
@@ -79,7 +122,7 @@ impl Chunk {
                     (self.position.x * CHUNK_SIZE + x) as f64 / 16.0,
                     (self.position.z * CHUNK_SIZE + z) as f64 / 16.0,
                 ]) * 16.0
-                    + 64.0;
+                    + 5.0;
 
                 for y in 0..CHUNK_HEIGHT {
                     let block_position = BlockPosition::new(x, y, z);
@@ -92,6 +135,263 @@ impl Chunk {
                 }
             }
         }
+    }
+
+    pub fn generate_greedy_mesh(&mut self) {
+        // Iterate through each axis (X,Y,Z)
+
+        let chunk_sizes = [CHUNK_SIZE, CHUNK_HEIGHT, CHUNK_SIZE];
+
+        for d in 0..3 {
+            let u = (d + 1) % 3;
+            let v = (d + 2) % 3;
+
+            let mut x = [0, 0, 0];
+            let mut q = [0, 0, 0];
+
+            let mask_size = chunk_sizes[u] * chunk_sizes[v];
+            let mut mask = vec![FMask::new(BlockType::AIR, 0); mask_size as usize];
+
+            q[d] = 1;
+
+            // Check each slice of the chunk one at a time
+            x[d] = -1;
+            while x[d] < chunk_sizes[d] {
+                let mut n = 0i32;
+
+                // Compute the mask
+
+                x[v] = 0;
+                while x[v] < chunk_sizes[v] {
+                    x[u] = 0;
+                    while x[u] < chunk_sizes[u] {
+                        // q determines the direction (X, Y or Z) that we are searching
+                        // m.IsBlockAt(x,y,z) takes global map positions and returns true if a block exists there
+
+                        let mut current_block: bool = false;
+                        if 0 <= x[d] {
+                            current_block = self.check_block(BlockPosition::new(x[0], x[1], x[2]));
+                        }
+
+                        let mut next_block: bool = false;
+                        if x[d] < chunk_sizes[d] - 1 && x[d] + q[d] >= 0 {
+                            next_block = self.check_block(BlockPosition::new(
+                                x[0] + q[0],
+                                x[1] + q[1],
+                                x[2] + q[2],
+                            ));
+                        }
+
+                        // The mask is set to true if there is a visible face between two blocks,
+                        //   i.e. both aren't empty and both aren't blocks
+                        mask[n as usize] = if current_block == next_block {
+                            FMask::new(BlockType::AIR, 0)
+                        } else if current_block {
+                            FMask::new(
+                                self.get_block(BlockPosition::new(x[0], x[1], x[2]))
+                                    .unwrap()
+                                    .block_type,
+                                1,
+                            )
+                        } else {
+                            FMask::new(
+                                self.get_block(BlockPosition::new(
+                                    x[0] + q[0],
+                                    x[1] + q[1],
+                                    x[2] + q[2],
+                                ))
+                                .unwrap()
+                                .block_type,
+                                -1,
+                            )
+                        };
+
+                        n += 1;
+
+                        x[u] += 1;
+                    }
+
+                    x[v] += 1;
+                }
+
+                x[d] += 1;
+
+                n = 0;
+
+                // Generate a mesh from the mask using lexicographic ordering,
+                //   by looping over each block in this slice of the chunk
+
+                for j in 0i32..chunk_sizes[v] {
+                    let mut i = 0;
+                    while i < chunk_sizes[u] {
+                        if mask[n as usize].normal != 0 {
+                            let current_mask = mask[n as usize];
+                            // Compute the width of this quad and store it in w
+                            //   This is done by searching along the current axis until mask[n + w] is false
+                            let mut w = 1i32;
+
+                            while i + w < chunk_sizes[u] && mask[(n + w) as usize].normal != 0 {
+                                w += 1;
+                            }
+
+                            // Compute the height of this quad and store it in h
+                            //   This is done by checking if every block next to this row (range 0 to w) is also part of the mask.
+                            //   For example, if w is 5 we currently have a quad of dimensions 1 x 5. To reduce triangle count,
+                            //   greedy meshing will attempt to expand this quad out to CHUNK_SIZE x 5, but will stop if it reaches a hole in the mask
+
+                            let mut h = 1;
+                            'outer: while (j + h as i32) < chunk_sizes[v] {
+                                for k in 0..w {
+                                    // if there is a hole in the mask, we can't expand the quad out any further
+                                    if mask[n as usize + k as usize + h * chunk_sizes[u] as usize]
+                                        .normal
+                                        != current_mask.normal
+                                    {
+                                        break 'outer;
+                                    }
+                                }
+
+                                h += 1;
+                            }
+
+                            x[u] = i;
+                            x[v] = j;
+
+                            // du and  dv are the dimensions of the quad
+                            let mut du = [0, 0, 0];
+                            let mut dv = [0, 0, 0];
+
+                            // Set the dimensions of the quad
+                            du[u] = w;
+                            dv[v] = h;
+
+                            self.create_quad(
+                                mask[n as usize],
+                                q,
+                                w as f32,
+                                h as f32,
+                                [x[0] as f32, x[1] as f32, x[2] as f32],
+                                [
+                                    (x[0] + du[0] as i32) as f32,
+                                    (x[1] + du[1] as i32) as f32,
+                                    (x[2] + du[2] as i32) as f32,
+                                ],
+                                [
+                                    (x[0] + dv[0] as i32) as f32,
+                                    (x[1] + dv[1] as i32) as f32,
+                                    (x[2] + dv[2] as i32) as f32,
+                                ],
+                                [
+                                    (x[0] + du[0] as i32 + dv[0] as i32) as f32,
+                                    (x[1] + du[1] as i32 + dv[1] as i32) as f32,
+                                    (x[2] + du[2] as i32 + dv[2] as i32) as f32,
+                                ],
+                            );
+
+                            // Clear this part of the mask so that we don't create a quad for this face again
+                            for l in 0..h {
+                                for k in 0..w {
+                                    mask[(n as usize + k as usize + l * chunk_sizes[u] as usize)] =
+                                        FMask::new(BlockType::AIR, 0);
+                                }
+                            }
+
+                            // Increment i and n by the width of the quad
+                            i += w;
+                            n += w;
+                        } else {
+                            i += 1;
+                            n += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn create_quad(
+        &mut self,
+        mask: FMask,
+        q: [i32; 3],
+        width: f32,
+        height: f32,
+        top_left: [f32; 3],
+        top_right: [f32; 3],
+        bottom_right: [f32; 3],
+        bottom_left: [f32; 3],
+    ) {
+        println!(
+            "Location {} {} {} {}",
+            top_left[0], top_left[1], top_left[2], mask.normal
+        );
+        //  multiply q by mask.normal
+        let normal = [
+            q[0] * mask.normal as i32,
+            q[1] * mask.normal as i32,
+            q[2] * mask.normal as i32,
+        ];
+
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        let mut normals = Vec::new();
+        let mut uvs = Vec::new();
+
+        //  top left
+        vertices.push([top_left[0] as f32, top_left[1] as f32, top_left[2] as f32]);
+
+        //  top right
+        vertices.push([
+            top_right[0] as f32,
+            top_right[1] as f32,
+            top_right[2] as f32,
+        ]);
+
+        //  bottom right
+        vertices.push([
+            bottom_right[0] as f32,
+            bottom_right[1] as f32,
+            bottom_right[2] as f32,
+        ]);
+
+        //  bottom left
+        vertices.push([
+            bottom_left[0] as f32,
+            bottom_left[1] as f32,
+            bottom_left[2] as f32,
+        ]);
+
+        // indices
+        indices.push(self.vertex_count);
+        indices.push((self.vertex_count + 2).wrapping_sub(mask.normal as u32));
+        indices.push((self.vertex_count + 2).wrapping_add(mask.normal as u32));
+        indices.push(self.vertex_count + 3);
+        indices.push((self.vertex_count + 1).wrapping_add(mask.normal as u32));
+        indices.push((self.vertex_count + 1).wrapping_sub(mask.normal as u32));
+
+        // normals
+        normals.push([normal[0] as f32, normal[1] as f32, normal[2] as f32]);
+        normals.push([normal[0] as f32, normal[1] as f32, normal[2] as f32]);
+        normals.push([normal[0] as f32, normal[1] as f32, normal[2] as f32]);
+        normals.push([normal[0] as f32, normal[1] as f32, normal[2] as f32]);
+
+        if normal[0] == 0 || normal[0] == -1 {
+            uvs.push([width, height]);
+            uvs.push([0.0, height]);
+            uvs.push([width, 0.0]);
+            uvs.push([0.0, 0.0]);
+        } else {
+            uvs.push([width, height]);
+            uvs.push([height, 0.0]);
+            uvs.push([0.0, width]);
+            uvs.push([0.0, 0.0]);
+        }
+
+        self.vertices.append(&mut vertices);
+        self.indices.append(&mut indices);
+        self.normals.append(&mut normals);
+        self.uvs.append(&mut uvs);
+
+        self.vertex_count += 4;
     }
 
     pub fn generate_mesh(&mut self) {
@@ -130,28 +430,31 @@ impl Chunk {
     pub fn apply_mesh(&mut self) {
         self.mesh
             .insert_attribute(Mesh::ATTRIBUTE_POSITION, self.vertices.clone());
-        // self.mesh
-        // .insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs.clone());
+        self.mesh
+            .insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals.clone());
+        self.mesh
+            .insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs.clone());
 
         self.mesh
             .set_indices(Some(Indices::U32(self.indices.clone())));
     }
 
     pub fn create_face(&mut self, position: BlockPosition, direction: Direction) {
-        let position = BlockPosition {
-            x: position.x + self.position.x * CHUNK_SIZE,
-            y: position.y,
-            z: position.z + self.position.z * CHUNK_SIZE,
-        };
-
         let vertices = self.get_face_vertices(position, direction);
 
+        // vertices
         vertices.iter().for_each(|vertex| {
             self.vertices.push(*vertex);
+
+            let normal = self.get_normal(direction);
+            self.normals.push(normal);
+        });
+
+        UVS.iter().for_each(|uv| {
+            self.uvs.push(*uv);
         });
 
         // indices
-
         for index in 0..6 {
             self.indices.push(self.vertex_count + FACE_ORDER[index]);
         }
@@ -161,12 +464,6 @@ impl Chunk {
 
     pub fn get_normal(&self, direction: Direction) -> [f32; 3] {
         NORMALS[direction as usize]
-    }
-
-    pub fn get_uvs(&self, direction: Direction) -> Vec<[f32; 2]> {
-        let mut uvs: Vec<[f32; 2]> = Vec::new();
-
-        uvs
     }
 
     pub fn get_face_vertices(
@@ -191,11 +488,11 @@ impl Chunk {
 
     pub fn check_block(&self, position: BlockPosition) -> bool {
         if position.x < 0
-            || position.x >= CHUNK_SIZE
+            || position.x >= CHUNK_SIZE as i32
             || position.y < 0
-            || position.y >= CHUNK_HEIGHT
+            || position.y >= CHUNK_SIZE as i32
             || position.z < 0
-            || position.z >= CHUNK_SIZE
+            || position.z >= CHUNK_SIZE as i32
         {
             return true;
         }

@@ -74,4 +74,8 @@ impl Block {
     pub fn get_block_type(&self) -> BlockType {
         self.block_type
     }
+
+    pub fn set_transparent(&mut self) {
+        self.is_transparent = true;
+    }
 }
