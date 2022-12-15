@@ -1,15 +1,14 @@
 use bevy::{
     diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
-    pbr::wireframe::{Wireframe, WireframePlugin},
+    pbr::wireframe::WireframePlugin,
     prelude::*,
-    render::{mesh::Indices, render_resource::PrimitiveTopology},
 };
 
 use bevy_inspector_egui::WorldInspectorPlugin;
 
 use rust_game::{
     player::{MovementSettings, PlayerPlugin},
-    world::chunk::chunks::{Chunk, ChunkPosition},
+    world::chunk::{chunks::Chunk, ChunkPosition},
 };
 
 const CLEAR_COLOR: Color = Color::rgb(0.4, 0.4, 0.4);

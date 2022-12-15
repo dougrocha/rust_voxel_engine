@@ -1,6 +1,6 @@
 use bevy::{prelude::*, utils::HashMap};
 
-use super::chunk::chunks::{Chunk, ChunkPosition};
+use super::chunk::{chunks::Chunk, ChunkPosition};
 
 pub const DRAW_DISTANCE: i32 = 1;
 

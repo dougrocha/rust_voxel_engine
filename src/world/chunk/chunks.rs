@@ -1,3 +1,10 @@
+// Code ported from https://0fps.net/2012/06/30/meshing-in-a-minecraft-game/
+
+// Note this implementation does not support different block types or block normals
+// The original author describes how to do this here: https://0fps.net/2012/07/07/meshing-minecraft-part-2/
+// https://gist.github.com/Vercidium/a3002bd083cce2bc854c9ff8f0118d33
+// https://gist.github.com/IcyTv/7408523d21b8cccbfb29f927d4e098b2
+
 use bevy::{
     pbr::wireframe::Wireframe,
     prelude::*,
@@ -10,46 +17,7 @@ use crate::world::{
     voxel_data::{FACES, FACE_ORDER, NORMALS, UVS, VERTICES},
 };
 
-pub const CHUNK_SIZE: i32 = 32;
-pub const CHUNK_HEIGHT: i32 = 32;
-
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
-pub struct ChunkPosition {
-    pub x: i32,
-    pub z: i32,
-}
-
-impl ChunkPosition {
-    pub fn new(x: i32, z: i32) -> ChunkPosition {
-        ChunkPosition { x, z }
-    }
-}
-
-#[derive(Debug)]
-pub struct ChunkArray {
-    pub blocks: [[[Block; CHUNK_SIZE as usize]; CHUNK_HEIGHT as usize]; CHUNK_SIZE as usize],
-}
-
-impl ChunkArray {
-    pub fn new() -> ChunkArray {
-        let blocks = [[[Block::new(BlockType::DEFAULT); CHUNK_SIZE as usize];
-            CHUNK_HEIGHT as usize]; CHUNK_SIZE as usize];
-
-        ChunkArray { blocks }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct FMask {
-    pub block_type: BlockType,
-    pub normal: i8,
-}
-
-impl FMask {
-    pub fn new(block_type: BlockType, normal: i8) -> FMask {
-        FMask { block_type, normal }
-    }
-}
+use super::{ChunkArray, ChunkPosition, FMask, CHUNK_HEIGHT, CHUNK_SIZE};
 
 #[derive(Debug)]
 pub struct Chunk {
@@ -91,8 +59,8 @@ impl Chunk {
         materials: &mut ResMut<Assets<StandardMaterial>>,
         meshes: &mut ResMut<Assets<Mesh>>,
     ) {
-        // self.generate_greedy_mesh();
-        self.generate_mesh();
+        self.generate_greedy_mesh();
+        // self.generate_mesh();
 
         self.apply_mesh();
 
@@ -127,7 +95,7 @@ impl Chunk {
                 for y in 0..CHUNK_HEIGHT {
                     let block_position = BlockPosition::new(x, y, z);
 
-                    if (y as f64) < height {
+                    if (y as f64) <= height {
                         self.set_block(block_position, Block::new(BlockType::DIRT));
                     } else {
                         self.set_block(block_position, Block::new(BlockType::AIR));
@@ -150,7 +118,7 @@ impl Chunk {
             let mut q = [0, 0, 0];
 
             let mask_size = chunk_sizes[u] * chunk_sizes[v];
-            let mut mask = vec![FMask::new(BlockType::AIR, 0); mask_size as usize];
+            let mut mask: Vec<FMask> = vec![FMask::new(BlockType::AIR, 0); mask_size as usize];
 
             q[d] = 1;
 
@@ -166,16 +134,16 @@ impl Chunk {
                     x[u] = 0;
                     while x[u] < chunk_sizes[u] {
                         // q determines the direction (X, Y or Z) that we are searching
-                        // m.IsBlockAt(x,y,z) takes global map positions and returns true if a block exists there
+                        // check_block will check if the next block is transparent
 
                         let mut current_block: bool = false;
                         if 0 <= x[d] {
-                            current_block = self.check_block(BlockPosition::new(x[0], x[1], x[2]));
+                            current_block = !self.check_block(BlockPosition::new(x[0], x[1], x[2]));
                         }
 
                         let mut next_block: bool = false;
                         if x[d] < chunk_sizes[d] - 1 && x[d] + q[d] >= 0 {
-                            next_block = self.check_block(BlockPosition::new(
+                            next_block = !self.check_block(BlockPosition::new(
                                 x[0] + q[0],
                                 x[1] + q[1],
                                 x[2] + q[2],
@@ -225,12 +193,14 @@ impl Chunk {
                     let mut i = 0;
                     while i < chunk_sizes[u] {
                         if mask[n as usize].normal != 0 {
-                            let current_mask = mask[n as usize];
+                            let current_mask: FMask = mask[n as usize];
                             // Compute the width of this quad and store it in w
                             //   This is done by searching along the current axis until mask[n + w] is false
                             let mut w = 1i32;
 
-                            while i + w < chunk_sizes[u] && mask[(n + w) as usize].normal != 0 {
+                            while i + w < chunk_sizes[u]
+                                && Chunk::compare_mask(current_mask, mask[(n + w) as usize])
+                            {
                                 w += 1;
                             }
 
@@ -242,13 +212,13 @@ impl Chunk {
                             let mut h = 1;
                             'outer: while (j + h as i32) < chunk_sizes[v] {
                                 for k in 0..w {
+                                    let compare_mask: FMask =
+                                        mask[n as usize + k as usize + h * chunk_sizes[u] as usize];
                                     // if there is a hole in the mask, we can't expand the quad out any further
-                                    if mask[n as usize + k as usize + h * chunk_sizes[u] as usize]
-                                        .normal
-                                        != current_mask.normal
-                                    {
-                                        break 'outer;
+                                    if Chunk::compare_mask(current_mask, compare_mask) {
+                                        continue;
                                     }
+                                    break 'outer;
                                 }
 
                                 h += 1;
@@ -309,6 +279,10 @@ impl Chunk {
         }
     }
 
+    fn compare_mask(mask: FMask, compare: FMask) -> bool {
+        mask.normal == compare.normal && mask.block_type == compare.block_type
+    }
+
     pub fn create_quad(
         &mut self,
         mask: FMask,
@@ -320,10 +294,6 @@ impl Chunk {
         bottom_right: [f32; 3],
         bottom_left: [f32; 3],
     ) {
-        println!(
-            "Location {} {} {} {}",
-            top_left[0], top_left[1], top_left[2], mask.normal
-        );
         //  multiply q by mask.normal
         let normal = [
             q[0] * mask.normal as i32,
@@ -374,7 +344,7 @@ impl Chunk {
         normals.push([normal[0] as f32, normal[1] as f32, normal[2] as f32]);
         normals.push([normal[0] as f32, normal[1] as f32, normal[2] as f32]);
 
-        if normal[0] == 0 || normal[0] == -1 {
+        if normal[0] == 1 || normal[0] == -1 {
             uvs.push([width, height]);
             uvs.push([0.0, height]);
             uvs.push([width, 0.0]);
@@ -440,15 +410,7 @@ impl Chunk {
     }
 
     pub fn create_face(&mut self, position: BlockPosition, direction: Direction) {
-        let vertices = self.get_face_vertices(position, direction);
-
-        // vertices
-        vertices.iter().for_each(|vertex| {
-            self.vertices.push(*vertex);
-
-            let normal = self.get_normal(direction);
-            self.normals.push(normal);
-        });
+        self.set_face_verticies(position, direction);
 
         UVS.iter().for_each(|uv| {
             self.uvs.push(*uv);
@@ -466,13 +428,7 @@ impl Chunk {
         NORMALS[direction as usize]
     }
 
-    pub fn get_face_vertices(
-        &self,
-        position: BlockPosition,
-        direction: Direction,
-    ) -> Vec<[f32; 3]> {
-        let mut vertices: Vec<[f32; 3]> = Vec::new();
-
+    pub fn set_face_verticies(&mut self, position: BlockPosition, direction: Direction) {
         for index in FACES[direction as usize] {
             let vertex = [
                 position.x as f32 + VERTICES[index][0],
@@ -480,17 +436,24 @@ impl Chunk {
                 position.z as f32 + VERTICES[index][2],
             ];
 
-            vertices.push(vertex);
-        }
+            self.vertices.push(vertex);
 
-        vertices
+            let normal = self.get_normal(direction);
+            self.normals.push(normal);
+        }
     }
 
+    /**
+     * Checks if the block is transparent
+     *
+     * @param position The position of the block
+     * @return True if the block is transparent
+     */
     pub fn check_block(&self, position: BlockPosition) -> bool {
         if position.x < 0
             || position.x >= CHUNK_SIZE as i32
             || position.y < 0
-            || position.y >= CHUNK_SIZE as i32
+            || position.y >= CHUNK_HEIGHT as i32
             || position.z < 0
             || position.z >= CHUNK_SIZE as i32
         {
