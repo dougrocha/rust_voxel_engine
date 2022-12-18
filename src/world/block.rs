@@ -23,6 +23,16 @@ pub enum BlockType {
     LAVA,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum Direction {
+    UP,
+    DOWN,
+    FRONT,
+    BACK,
+    LEFT,
+    RIGHT,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockPosition {
     pub x: i32,

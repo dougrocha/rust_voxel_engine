@@ -1,11 +1,12 @@
 use bevy::{
     ecs::event::ManualEventReader, input::mouse::MouseMotion, prelude::*, window::CursorGrabMode,
 };
+use bevy_inspector_egui::Inspectable;
 
-use crate::{
-    camera::FpsCameraComponent,
-    window::{cursor_grab, initial_grab_cursor},
-};
+use crate::window::{cursor_grab, initial_grab_cursor};
+
+#[derive(Component)]
+pub struct Player;
 
 // Keep track of mouse events, pitch, yaw
 #[derive(Resource, Default)]
@@ -15,7 +16,24 @@ pub struct MouseState {
     yaw: f32,
 }
 
-#[derive(Resource)]
+#[derive(Resource, Inspectable)]
+pub struct PlayerPosition {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+impl Default for PlayerPosition {
+    fn default() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        }
+    }
+}
+
+#[derive(Resource, Inspectable)]
 pub struct MovementSettings {
     pub mouse_sensitivity: f32,
     pub walk_speed: f32,
@@ -24,8 +42,6 @@ pub struct MovementSettings {
     pub gravity: f32,
     pub jump_height: f32,
     pub max_velocity: f32,
-
-    pub position: Vec3,
 }
 
 pub struct PlayerPlugin;
@@ -33,6 +49,7 @@ impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MouseState>()
             .init_resource::<MovementSettings>()
+            .init_resource::<PlayerPosition>()
             .add_startup_system(setup_player)
             .add_startup_system(initial_grab_cursor)
             .add_system(player_move)
@@ -51,18 +68,21 @@ impl Default for MovementSettings {
             gravity: 9.81,
             jump_height: 1.5,
             max_velocity: 10.,
-            position: Vec3::ZERO,
         }
     }
 }
 
-fn setup_player(mut commands: Commands, movement_settings: Res<MovementSettings>) {
+fn setup_player(mut commands: Commands, position: Res<PlayerPosition>) {
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_translation(movement_settings.position),
+            transform: Transform::from_translation(Vec3::new(
+                position.x as f32,
+                position.y as f32,
+                position.z as f32,
+            )),
             ..Default::default()
         },
-        FpsCameraComponent,
+        Player,
     ));
 }
 
@@ -72,7 +92,7 @@ fn player_look(
     windows: Res<Windows>,
     mut state: ResMut<MouseState>,
     motion: Res<Events<MouseMotion>>,
-    mut query: Query<&mut Transform, With<FpsCameraComponent>>,
+    mut query: Query<&mut Transform, With<Player>>,
 ) {
     if let Some(window) = windows.get_primary() {
         let mut delta_state = state.as_mut();
@@ -107,7 +127,7 @@ fn player_move(
     time: Res<Time>,
     windows: Res<Windows>,
     settings: Res<MovementSettings>,
-    mut query: Query<&mut Transform, With<FpsCameraComponent>>,
+    mut query: Query<&mut Transform, With<Player>>,
 ) {
     if let Some(window) = windows.get_primary() {
         for mut transform in query.iter_mut() {

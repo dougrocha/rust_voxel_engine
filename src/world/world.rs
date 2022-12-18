@@ -2,38 +2,36 @@ use bevy::{prelude::*, utils::HashMap};
 
 use super::chunk::{chunks::Chunk, ChunkPosition};
 
-pub const DRAW_DISTANCE: i32 = 1;
+#[derive(Default, Resource)]
+pub struct ViewDistance {
+    pub distance: i32,
+}
 
-pub struct ChunkWorld {
+#[derive(Resource)]
+pub struct ChunkMap {
     pub chunks: HashMap<ChunkPosition, Chunk>,
 }
 
-impl ChunkWorld {
-    pub fn new() -> ChunkWorld {
-        ChunkWorld {
+impl ChunkMap {
+    pub fn new() -> ChunkMap {
+        ChunkMap {
             chunks: HashMap::new(),
         }
     }
 
-    pub fn render(
-        &mut self,
-        mut commands: Commands,
-        mut meshes: ResMut<Assets<Mesh>>,
-        mut materials: ResMut<Assets<StandardMaterial>>,
-    ) {
-        for x in -DRAW_DISTANCE..DRAW_DISTANCE {
-            for z in -DRAW_DISTANCE..DRAW_DISTANCE {
-                let position = ChunkPosition::new(x, z);
+    pub fn set(&mut self, chunk_position: ChunkPosition, chunk: Chunk) {
+        self.chunks.insert(chunk_position, chunk);
+    }
 
-                if !self.chunks.contains_key(&position) {
-                    let mut chunk = Chunk::new(position);
+    pub fn get(&self, chunk_position: &ChunkPosition) -> Option<&Chunk> {
+        self.chunks.get(chunk_position)
+    }
 
-                    chunk.generate_blocks();
-                    chunk.render(&mut commands, &mut materials, &mut meshes);
+    pub fn get_mut(&mut self, chunk_position: &ChunkPosition) -> Option<&mut Chunk> {
+        self.chunks.get_mut(chunk_position)
+    }
 
-                    self.chunks.insert(position, chunk);
-                }
-            }
-        }
+    pub fn remove(&mut self, chunk_position: &ChunkPosition) {
+        self.chunks.remove(&chunk_position);
     }
 }

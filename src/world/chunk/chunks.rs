@@ -13,17 +13,16 @@ use bevy::{
 use noise::NoiseFn;
 
 use crate::world::{
-    block::{Block, BlockPosition, BlockType},
+    block::{Block, BlockPosition, BlockType, Direction},
     voxel_data::{FACES, FACE_ORDER, NORMALS, UVS, VERTICES},
 };
 
 use super::{ChunkArray, ChunkPosition, FMask, CHUNK_HEIGHT, CHUNK_SIZE};
 
-#[derive(Debug)]
+#[derive(Component)]
 pub struct Chunk {
-    pub blocks: ChunkArray,
+    pub chunk_array: ChunkArray,
     pub position: ChunkPosition,
-
     pub vertices: Vec<[f32; 3]>,
     pub indices: Vec<u32>,
     pub normals: Vec<[f32; 3]>,
@@ -38,10 +37,8 @@ pub struct Chunk {
 
 impl Chunk {
     pub fn new(position: ChunkPosition) -> Chunk {
-        let blocks = ChunkArray::new();
-
         Chunk {
-            blocks,
+            chunk_array: ChunkArray::new(),
             position,
             vertices: Vec::new(),
             indices: Vec::new(),
@@ -51,6 +48,37 @@ impl Chunk {
             vertex_count: 0,
             mesh: Mesh::new(PrimitiveTopology::TriangleList),
         }
+    }
+
+    pub fn get_block(&self, position: BlockPosition) -> Option<&Block> {
+        if position.x < 0
+            || position.x >= CHUNK_SIZE
+            || position.y < 0
+            || position.y >= CHUNK_HEIGHT
+            || position.z < 0
+            || position.z >= CHUNK_SIZE
+        {
+            return None;
+        }
+
+        Some(
+            &self.chunk_array.blocks[position.x as usize][position.y as usize][position.z as usize],
+        )
+    }
+
+    pub fn set_block(&mut self, position: BlockPosition, block: Block) {
+        if position.x < 0
+            || position.x >= CHUNK_SIZE
+            || position.y < 0
+            || position.y >= CHUNK_HEIGHT
+            || position.z < 0
+            || position.z >= CHUNK_SIZE
+        {
+            return;
+        }
+
+        self.chunk_array.blocks[position.x as usize][position.y as usize][position.z as usize] =
+            block;
     }
 
     pub fn render(
@@ -68,7 +96,7 @@ impl Chunk {
             PbrBundle {
                 mesh: meshes.add(self.mesh.clone()),
                 material: materials.add(StandardMaterial {
-                    base_color: Color::rgb(0.5, 0.5, 0.5),
+                    base_color: Color::GREEN,
                     ..Default::default()
                 }),
                 transform: Transform::from_translation(Vec3::new(
@@ -79,7 +107,7 @@ impl Chunk {
                 ..Default::default()
             },
             // Only render the wireframe of the mesh for testing purposes
-            Wireframe,
+            // Wireframe,
         ));
     }
 
@@ -89,8 +117,8 @@ impl Chunk {
                 let height = self.noise.get([
                     (self.position.x * CHUNK_SIZE + x) as f64 / 16.0,
                     (self.position.z * CHUNK_SIZE + z) as f64 / 16.0,
-                ]) * 16.0
-                    + 5.0;
+                ]) * 5.0
+                    + 64.0;
 
                 for y in 0..CHUNK_HEIGHT {
                     let block_position = BlockPosition::new(x, y, z);
@@ -477,30 +505,4 @@ impl Chunk {
             Direction::BACK => BlockPosition::new(position.x, position.y, position.z - 1),
         }
     }
-
-    pub fn get_block(&self, position: BlockPosition) -> Option<&Block> {
-        Some(&self.blocks.blocks[position.x as usize][position.y as usize][position.z as usize])
-    }
-
-    pub fn get_block_mut(&mut self, position: BlockPosition) -> Option<&mut Block> {
-        Some(&mut self.blocks.blocks[position.x as usize][position.y as usize][position.z as usize])
-    }
-
-    pub fn set_block(&mut self, position: BlockPosition, block: Block) {
-        self.blocks.blocks[position.x as usize][position.y as usize][position.z as usize] = block;
-    }
-
-    pub fn get_block_type(&self, position: BlockPosition) -> Option<BlockType> {
-        Some(self.get_block(position)?.block_type.clone())
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum Direction {
-    UP,
-    DOWN,
-    FRONT,
-    BACK,
-    LEFT,
-    RIGHT,
 }

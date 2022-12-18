@@ -1,4 +1,3 @@
-pub mod camera;
 pub mod game;
 pub mod player;
 pub mod window;
