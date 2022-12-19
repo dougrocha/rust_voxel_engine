@@ -7,11 +7,12 @@ use noise::NoiseFn;
 use self::chunks::Chunk;
 
 use super::{
-    block::{Block, BlockType},
+    block::{Block, BlockPosition, BlockType},
     world::ChunkMap,
 };
 
 pub mod chunks;
+pub mod mesh;
 
 pub const CHUNK_SIZE: i32 = 16;
 pub const CHUNK_HEIGHT: i32 = 256;
@@ -34,6 +35,13 @@ impl ChunkPosition {
         }
     }
 
+    pub fn from_block_position(block_position: &BlockPosition) -> ChunkPosition {
+        ChunkPosition {
+            x: (block_position.x / CHUNK_SIZE) as i32,
+            z: (block_position.z / CHUNK_SIZE) as i32,
+        }
+    }
+
     pub fn distance_to(&self, other: &ChunkPosition) -> f32 {
         (((self.x - other.x).pow(2) + (self.z - other.z).pow(2)) as f32).sqrt()
     }
@@ -51,17 +59,20 @@ impl ChunkArray {
 
         ChunkArray { blocks }
     }
-}
 
-#[derive(Clone, Copy)]
-pub struct FMask {
-    pub block_type: BlockType,
-    pub normal: i8,
-}
+    pub fn set_block(&mut self, block_position: &BlockPosition, block: Block) {
+        self.blocks[block_position.x as usize][block_position.y as usize]
+            [block_position.z as usize] = block;
+    }
 
-impl FMask {
-    pub fn new(block_type: BlockType, normal: i8) -> FMask {
-        FMask { block_type, normal }
+    pub fn get_block(&self, block_position: &BlockPosition) -> &Block {
+        &self.blocks[block_position.x as usize][block_position.y as usize]
+            [block_position.z as usize]
+    }
+
+    pub fn get_block_mut(&mut self, block_position: &BlockPosition) -> &mut Block {
+        &mut self.blocks[block_position.x as usize][block_position.y as usize]
+            [block_position.z as usize]
     }
 }
 
@@ -98,31 +109,45 @@ pub fn destroy_chunks(
     })
 }
 
-pub fn generate_height_map(seed: u32, chunk_position: &ChunkPosition) -> ChunkArray {
-    let mut chunk = ChunkArray::new();
+pub fn generate_height_map(chunk_position: &ChunkPosition, seed: u32, scale: f64) -> Vec<f64> {
+    let noise = noise::Perlin::new(seed);
 
-    let noise = noise::OpenSimplex::new(seed);
+    let mut height_map: Vec<f64> = Vec::with_capacity((CHUNK_SIZE * CHUNK_SIZE) as usize);
 
     for x in 0..CHUNK_SIZE {
         for z in 0..CHUNK_SIZE {
-            let height = (noise.get([
-                (chunk_position.x * CHUNK_SIZE + x) as f64 / 16.0,
-                (chunk_position.z * CHUNK_SIZE + z) as f64 / 16.0,
-            ]) * 16.0) as i32;
+            let x = x as f64 + (chunk_position.x * CHUNK_SIZE) as f64;
+            let z = z as f64 + (chunk_position.z * CHUNK_SIZE) as f64;
 
-            for y in 0..CHUNK_HEIGHT {
-                if y < height {
-                    chunk.blocks[x as usize][y as usize][z as usize] = Block::new(BlockType::STONE);
-                } else if y == height {
-                    chunk.blocks[x as usize][y as usize][z as usize] = Block::new(BlockType::GRASS);
-                } else {
-                    chunk.blocks[x as usize][y as usize][z as usize] = Block::new(BlockType::AIR);
-                }
+            let height = noise.get([x / scale, z / scale]) * 32.0 + 64.0;
+
+            height_map.push(height);
+        }
+    }
+
+    height_map
+}
+
+pub fn generate_terrain(chunk_position: &ChunkPosition, seed: u32, scale: f64) -> ChunkArray {
+    let mut chunk_array = ChunkArray::new();
+
+    let height_map = generate_height_map(chunk_position, seed, scale);
+
+    for x in 0..CHUNK_SIZE {
+        for z in 0..CHUNK_SIZE {
+            let x = x as f64 + (chunk_position.x * CHUNK_SIZE) as f64;
+            let z = z as f64 + (chunk_position.z * CHUNK_SIZE) as f64;
+
+            for y in 0..height_map[(x as usize) + (z as usize) * CHUNK_SIZE as usize] as i32 {
+                chunk_array.set_block(
+                    &BlockPosition::new(x as i32, y, z as i32),
+                    Block::new(BlockType::GRASS),
+                )
             }
         }
     }
 
-    chunk
+    chunk_array
 }
 
 #[derive(Default, Resource)]

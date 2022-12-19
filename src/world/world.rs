@@ -1,6 +1,9 @@
 use bevy::{prelude::*, utils::HashMap};
 
-use super::chunk::{chunks::Chunk, ChunkPosition};
+use super::{
+    block::{Block, BlockPosition},
+    chunk::{chunks::Chunk, ChunkPosition},
+};
 
 #[derive(Default, Resource)]
 pub struct ViewDistance {
@@ -11,6 +14,9 @@ pub struct ViewDistance {
 pub struct ChunkMap {
     pub chunks: HashMap<ChunkPosition, Chunk>,
 }
+
+#[derive(Resource)]
+pub struct DirtyChunks(pub Vec<ChunkPosition>);
 
 impl ChunkMap {
     pub fn new() -> ChunkMap {

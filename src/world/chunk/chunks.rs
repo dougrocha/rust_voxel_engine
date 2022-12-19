@@ -17,7 +17,10 @@ use crate::world::{
     voxel_data::{FACES, FACE_ORDER, NORMALS, UVS, VERTICES},
 };
 
-use super::{ChunkArray, ChunkPosition, FMask, CHUNK_HEIGHT, CHUNK_SIZE};
+use super::{
+    mesh::{create_chunk_mesh, FMask},
+    ChunkArray, ChunkPosition, CHUNK_HEIGHT, CHUNK_SIZE,
+};
 
 #[derive(Component)]
 pub struct Chunk {
@@ -87,8 +90,14 @@ impl Chunk {
         materials: &mut ResMut<Assets<StandardMaterial>>,
         meshes: &mut ResMut<Assets<Mesh>>,
     ) {
-        self.generate_greedy_mesh();
-        // self.generate_mesh();
+        let mesh = create_chunk_mesh(&self);
+
+        self.vertices = mesh.vertices;
+        self.indices = mesh.indices;
+        self.normals = mesh.normals;
+        self.uvs = mesh.uvs;
+
+        self.vertex_count = mesh.vertex_count;
 
         self.apply_mesh();
 

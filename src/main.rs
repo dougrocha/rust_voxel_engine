@@ -1,11 +1,16 @@
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+};
 
 use bevy::{
     diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     ecs::schedule::ShouldRun,
     pbr::wireframe::WireframePlugin,
     prelude::*,
-    utils::HashMap,
+    render::{mesh::Indices, render_resource::PrimitiveTopology},
+    tasks::AsyncComputeTaskPool,
+    utils::hashbrown,
 };
 
 use bevy_inspector_egui::{
@@ -20,12 +25,15 @@ use rust_game::{
     world::{
         block::{Block, BlockPosition, BlockType},
         chunk::{
-            chunks::Chunk, create_chunk, destroy_chunks, ChunkEntities, ChunkPosition, ChunkQueue,
-            CHUNK_HEIGHT, CHUNK_SIZE,
+            chunks::Chunk, create_chunk, destroy_chunks, generate_height_map,
+            mesh::create_chunk_mesh, ChunkEntities, ChunkPosition, ChunkQueue, CHUNK_HEIGHT,
+            CHUNK_SIZE,
         },
         world::{ChunkMap, ViewDistance},
     },
 };
+
+use rayon::prelude::*;
 
 const CLEAR_COLOR: Color = Color::rgb(0.4, 0.4, 0.4);
 
@@ -211,13 +219,38 @@ pub fn generate_chunk(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // generate each entity
-    for chunk_pos in chunk_entities.iter_keys() {
-        println!("Generating chunk {:?}", chunk_pos);
+    for (chunk_pos, chunk_entity) in chunk_entities.iter() {
         chunk_map.set(*chunk_pos, Chunk::new(*chunk_pos));
 
         let chunk = chunk_map.get_mut(&*chunk_pos).unwrap();
 
-        chunk.render(&mut commands, &mut materials, &mut meshes);
+        let chunk_mesh = create_chunk_mesh(&chunk);
+
+        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, chunk_mesh.vertices);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, chunk_mesh.normals);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, chunk_mesh.uvs);
+
+        mesh.set_indices(Some(Indices::U32(chunk_mesh.indices)));
+
+        commands.entity(*chunk_entity).insert((
+            PbrBundle {
+                mesh: meshes.add(mesh),
+                material: materials.add(StandardMaterial {
+                    base_color: Color::GREEN,
+                    ..Default::default()
+                }),
+                transform: Transform::from_translation(Vec3::new(
+                    chunk_pos.x as f32 * CHUNK_SIZE as f32,
+                    0.0,
+                    chunk_pos.z as f32 * CHUNK_SIZE as f32,
+                )),
+                ..Default::default()
+            },
+            // Only render the wireframe of the mesh for testing purposes
+            // Wireframe,
+        ));
     }
 }
 
