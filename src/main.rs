@@ -1,268 +1,127 @@
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, Mutex},
-};
+//! This example shows how to use the ECS and the [`AsyncComputeTaskPool`]
+//! to spawn, poll, and complete tasks across systems and system ticks.
 
 use bevy::{
-    diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
-    ecs::schedule::ShouldRun,
-    pbr::wireframe::WireframePlugin,
     prelude::*,
-    render::{mesh::Indices, render_resource::PrimitiveTopology},
-    tasks::AsyncComputeTaskPool,
-    utils::hashbrown,
+    tasks::{AsyncComputeTaskPool, Task},
 };
-
-use bevy_inspector_egui::{
-    bevy_egui::EguiContext, widgets::InNewWindow, Inspectable, InspectorPlugin,
-    WorldInspectorPlugin,
-};
-
-use ndshape::{ConstShape, ConstShape3i32, ConstShape3u32};
-use noise::NoiseFn;
-use rust_game::{
-    player::{MovementSettings, Player, PlayerPlugin, PlayerPosition},
-    world::{
-        block::{Block, BlockPosition, BlockType},
-        chunk::{
-            chunks::Chunk, create_chunk, destroy_chunks, generate_height_map,
-            mesh::create_chunk_mesh, ChunkEntities, ChunkPosition, ChunkQueue, CHUNK_HEIGHT,
-            CHUNK_SIZE,
-        },
-        world::{ChunkMap, ViewDistance},
-    },
-};
-
-use rayon::prelude::*;
-
-const CLEAR_COLOR: Color = Color::rgb(0.4, 0.4, 0.4);
+use futures_lite::future;
+use rand::Rng;
+use std::time::{Duration, Instant};
 
 fn main() {
     App::new()
-        .insert_resource(ClearColor(CLEAR_COLOR))
-        .insert_resource(Msaa { samples: 4 })
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            window: WindowDescriptor {
-                title: "Voxel Engine".into(),
-                ..default()
-            },
-            ..default()
-        }))
-        .insert_resource(MovementSettings {
-            walk_speed: 30.0,
-            ..default()
-        })
-        // Debug
-        .add_plugin(DebugUIPlugin)
-        // Game State
-        .add_plugin(WorldGenerationPlugin)
-        .add_startup_system(setup_light)
-        .add_startup_system(setup_world)
-        .add_plugin(PlayerPlugin)
+        .add_plugins(DefaultPlugins)
+        .add_startup_system(setup_env)
+        .add_startup_system(add_assets)
+        .add_startup_system(spawn_tasks)
+        .add_system(handle_tasks)
         .run();
 }
 
-/// Run criteria for the [`update_view_chunks`] system
-fn update_chunks_criteria(
-    position: Res<PlayerPosition>,
-    view_distance: Res<ViewDistance>,
-) -> ShouldRun {
-    if position.is_changed() || view_distance.is_changed() {
-        ShouldRun::Yes
-    } else {
-        ShouldRun::No
-    }
-}
+// Number of cubes to spawn across the x, y, and z axis
+const NUM_CUBES: u32 = 6;
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash, StageLabel)]
-pub struct ChunkLoadingStage;
+#[derive(Resource, Deref)]
+struct BoxMeshHandle(Handle<Mesh>);
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash, SystemLabel)]
-/// Labels for the systems added by [`VoxelWorldChunkingPlugin`]
-pub enum ChunkLoadingSystem {
-    /// Updates the player current chunk.
-    /// The computed position is used for loading / meshing priority systems.
-    UpdatePlayerPos,
-    /// Runs chunk view distance calculations and queue events for chunk creations and deletions.
-    UpdateViewChunks,
-    /// Creates the voxel buffers to hold chunk data and attach them a chunk entity in the ECS world.
-    CreateChunks,
-    /// Clears the dirty chunks list.
-    ClearDirtyChunks,
+#[derive(Resource, Deref)]
+struct BoxMaterialHandle(Handle<StandardMaterial>);
 
-    // Generate the mesh for the chunk.
-    GenerateMesh,
-}
-
-/// set up a simple 3D scene
-fn setup_light(mut commands: Commands) {
-    //sky light
-    commands.insert_resource(AmbientLight {
-        color: Color::WHITE,
-        brightness: 0.80,
-    });
-}
-
-fn setup_world(
-    commands: Commands,
-    meshes: ResMut<Assets<Mesh>>,
-    materials: ResMut<Assets<StandardMaterial>>,
-    mut chunk_queue: ResMut<ChunkQueue>,
+/// Startup system which runs only once and generates our Box Mesh
+/// and Box Material assets, adds them to their respective Asset
+/// Resources, and stores their handles as resources so we can access
+/// them later when we're ready to render our Boxes
+fn add_assets(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // add one chunk to queue
+    let box_mesh_handle = meshes.add(Mesh::from(shape::Cube { size: 0.25 }));
+    commands.insert_resource(BoxMeshHandle(box_mesh_handle));
 
-    //     let mut world = ChunkWorld::new();
-
-    //     world.render(commands, meshes, materials);
+    let box_material_handle = materials.add(Color::rgb(1.0, 0.2, 0.3).into());
+    commands.insert_resource(BoxMaterialHandle(box_material_handle));
 }
 
-fn update_player_position(
-    player: Query<&GlobalTransform, (With<Player>, Changed<GlobalTransform>)>,
-    mut player_pos: ResMut<PlayerPosition>,
-) {
-    if let Ok(ply) = player.get_single() {
-        let player_coords = ply.translation().as_ivec3();
-        player_pos.x = player_coords.x as f32;
-        player_pos.y = player_coords.y as f32;
-        player_pos.z = player_coords.z as f32;
-    }
-}
+#[derive(Component)]
+struct ComputeTransform(Task<Transform>);
 
-fn update_chunks(
-    mut chunk_queue: ResMut<ChunkQueue>,
-    player_pos: ResMut<PlayerPosition>,
-    chunk_entities: ResMut<ChunkEntities>,
-    view_distance: Res<ViewDistance>,
-) {
-    let player_chunk = ChunkPosition::from_world_position(Vec3 {
-        x: player_pos.x,
-        y: player_pos.y,
-        z: player_pos.z,
-    });
+/// This system generates tasks simulating computationally intensive
+/// work that potentially spans multiple frames/ticks. A separate
+/// system, `handle_tasks`, will poll the spawned tasks on subsequent
+/// frames/ticks, and use the results to spawn cubes
+fn spawn_tasks(mut commands: Commands) {
+    let thread_pool = AsyncComputeTaskPool::get();
+    for x in 0..NUM_CUBES {
+        for y in 0..NUM_CUBES {
+            for z in 0..NUM_CUBES {
+                // Spawn new task on the AsyncComputeTaskPool
+                let task = thread_pool.spawn(async move {
+                    let mut rng = rand::thread_rng();
+                    let start_time = Instant::now();
+                    let duration = Duration::from_secs_f32(rng.gen_range(0.05..0.2));
+                    while start_time.elapsed() < duration {
+                        // Spinning for 'duration', simulating doing hard
+                        // compute work generating translation coords!
+                    }
 
-    for x in -view_distance.distance..=view_distance.distance {
-        for z in -view_distance.distance..=view_distance.distance {
-            let chunk_pos = ChunkPosition {
-                x: player_chunk.x + x,
-                z: player_chunk.z + z,
-            };
+                    // Such hard work, all done!
+                    Transform::from_xyz(x as f32, y as f32, z as f32)
+                });
 
-            if !chunk_entities.contains_key(&chunk_pos) {
-                chunk_queue.create.push(chunk_pos);
+                // Spawn new entity and add our new task as a component
+                commands.spawn(ComputeTransform(task));
             }
         }
     }
+}
 
-    // remove chunks that are too far away
-    for loaded_chunk in chunk_entities.iter_keys() {
-        if (loaded_chunk.x - player_chunk.x).abs() > view_distance.distance
-            || (loaded_chunk.z - player_chunk.z).abs() > view_distance.distance
-        {
-            chunk_queue.remove.push(*loaded_chunk);
+/// This system queries for entities that have our Task<Transform> component. It polls the
+/// tasks to see if they're complete. If the task is complete it takes the result, adds a
+/// new [`PbrBundle`] of components to the entity using the result from the task's work, and
+/// removes the task component from the entity.
+fn handle_tasks(
+    mut commands: Commands,
+    mut transform_tasks: Query<(Entity, &mut ComputeTransform)>,
+    box_mesh_handle: Res<BoxMeshHandle>,
+    box_material_handle: Res<BoxMaterialHandle>,
+) {
+    for (entity, mut task) in &mut transform_tasks {
+        if let Some(transform) = future::block_on(future::poll_once(&mut task.0)) {
+            // Add our new PbrBundle of components to our tagged entity
+            commands.entity(entity).insert(PbrBundle {
+                mesh: box_mesh_handle.clone(),
+                material: box_material_handle.clone(),
+                transform,
+                ..default()
+            });
+
+            // Task is complete, so remove task component from entity
+            commands.entity(entity).remove::<ComputeTransform>();
         }
     }
 }
 
-pub struct WorldGenerationPlugin;
-
-impl Plugin for WorldGenerationPlugin {
-    fn build(&self, app: &mut App) {
-        app.insert_resource(ChunkMap::new())
-            .insert_resource(ViewDistance { distance: 5 })
-            .init_resource::<ChunkEntities>()
-            .insert_resource(PlayerPosition {
-                x: 0.0,
-                y: 100.0,
-                z: 0.0,
-            })
-            .init_resource::<ChunkQueue>()
-            .add_stage_after(
-                CoreStage::Update,
-                ChunkLoadingStage,
-                SystemStage::parallel()
-                    .with_system(update_player_position.label(ChunkLoadingSystem::UpdatePlayerPos))
-                    .with_system(
-                        update_chunks
-                            .label(ChunkLoadingSystem::UpdateViewChunks)
-                            .after(ChunkLoadingSystem::UpdatePlayerPos)
-                            .with_run_criteria(update_chunks_criteria),
-                    )
-                    .with_system(
-                        create_chunk
-                            .label(ChunkLoadingSystem::CreateChunks)
-                            .after(ChunkLoadingSystem::UpdateViewChunks),
-                    )
-                    .with_system(
-                        generate_chunk
-                            .label(ChunkLoadingSystem::GenerateMesh)
-                            .after(ChunkLoadingSystem::CreateChunks)
-                            .with_run_criteria(generate_chunk_criteria),
-                    ),
-            )
-            .add_system_to_stage(CoreStage::Last, destroy_chunks);
-    }
-}
-
-pub fn generate_chunk_criteria(chunk_entities: Res<ChunkEntities>) -> ShouldRun {
-    if chunk_entities.is_changed() {
-        ShouldRun::Yes
+/// This system is only used to setup light and camera for the environment
+fn setup_env(mut commands: Commands) {
+    // Used to center camera on spawned cubes
+    let offset = if NUM_CUBES % 2 == 0 {
+        (NUM_CUBES / 2) as f32 - 0.5
     } else {
-        ShouldRun::No
-    }
-}
+        (NUM_CUBES / 2) as f32
+    };
 
-pub fn generate_chunk(
-    mut commands: Commands,
-    chunk_entities: ResMut<ChunkEntities>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut chunk_map: ResMut<ChunkMap>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    // generate each entity
-    for (chunk_pos, chunk_entity) in chunk_entities.iter() {
-        chunk_map.set(*chunk_pos, Chunk::new(*chunk_pos));
+    // lights
+    commands.spawn(PointLightBundle {
+        transform: Transform::from_xyz(4.0, 12.0, 15.0),
+        ..default()
+    });
 
-        let chunk = chunk_map.get_mut(&*chunk_pos).unwrap();
-
-        let chunk_mesh = create_chunk_mesh(&chunk);
-
-        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
-
-        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, chunk_mesh.vertices);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, chunk_mesh.normals);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, chunk_mesh.uvs);
-
-        mesh.set_indices(Some(Indices::U32(chunk_mesh.indices)));
-
-        commands.entity(*chunk_entity).insert((
-            PbrBundle {
-                mesh: meshes.add(mesh),
-                material: materials.add(StandardMaterial {
-                    base_color: Color::GREEN,
-                    ..Default::default()
-                }),
-                transform: Transform::from_translation(Vec3::new(
-                    chunk_pos.x as f32 * CHUNK_SIZE as f32,
-                    0.0,
-                    chunk_pos.z as f32 * CHUNK_SIZE as f32,
-                )),
-                ..Default::default()
-            },
-            // Only render the wireframe of the mesh for testing purposes
-            // Wireframe,
-        ));
-    }
-}
-
-pub struct DebugUIPlugin;
-
-impl Plugin for DebugUIPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_plugin(WorldInspectorPlugin::default())
-            .add_plugin(LogDiagnosticsPlugin::default())
-            .add_plugin(FrameTimeDiagnosticsPlugin::default())
-            .add_plugin(EntityCountDiagnosticsPlugin::default())
-            .add_plugin(WireframePlugin)
-            .add_plugin(InspectorPlugin::<PlayerPosition>::new());
-    }
+    // camera
+    commands.spawn(Camera3dBundle {
+        transform: Transform::from_xyz(offset, offset, 15.0)
+            .looking_at(Vec3::new(offset, offset, 0.0), Vec3::Y),
+        ..default()
+    });
 }
