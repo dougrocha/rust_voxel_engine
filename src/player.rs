@@ -155,8 +155,8 @@ pub fn toggle_grab_cursor(window: &mut Window) {
 pub fn initial_grab_cursor(mut window: Query<&mut Window, With<PrimaryWindow>>) {
     let mut window = window.single_mut();
 
-    window.cursor.grab_mode = CursorGrabMode::Confined;
-    window.cursor.visible = false;
+    // window.cursor.grab_mode = CursorGrabMode::Confined;
+    // window.cursor.visible = false;
 }
 
 pub fn cursor_grab(
