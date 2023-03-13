@@ -4,6 +4,7 @@ mod player;
 use std::sync::Arc;
 
 use bevy::{
+    diagnostic::FrameTimeDiagnosticsPlugin,
     prelude::*,
     render::{mesh::Indices, render_resource::PrimitiveTopology},
     tasks::{AsyncComputeTaskPool, Task},
@@ -25,8 +26,6 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugin(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
-        .add_plugin(bevy::diagnostic::EntityCountDiagnosticsPlugin::default())
         .add_plugin(WorldInspectorPlugin::default())
         // Game State
         .add_plugin(PlayerPlugin)
@@ -36,12 +35,15 @@ fn main() {
             vertical: 6,
         })
         .add_startup_system(setup_world)
-        .add_systems((
-            poll_chunks_in_view,
-            load_meshes_for_chunks,
-            poll_chunks_outside_view,
-            render_chunks,
-        ))
+        .add_systems(
+            (
+                poll_chunks_in_view,
+                load_meshes_for_chunks,
+                poll_chunks_outside_view,
+                render_chunks,
+            )
+                .chain(),
+        )
         .run();
 }
 
@@ -68,7 +70,7 @@ const CHUNK_SIZE: usize = 16;
 
 #[derive(Resource)]
 pub struct World {
-    pub chunks: HashMap<IVec3, Arc<Chunk>>,
+    pub chunks: HashMap<IVec3, Arc<Box<Chunk>>>,
 }
 
 impl Default for World {
@@ -243,7 +245,9 @@ pub fn poll_chunks_in_view(
                 }
             }
 
-            world.chunks.insert(chunk_position, Arc::new(chunk));
+            world
+                .chunks
+                .insert(chunk_position, Arc::new(Box::new(chunk)));
         }
     }
 }
