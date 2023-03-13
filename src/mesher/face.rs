@@ -1,8 +1,10 @@
 use std::ops::Deref;
 
+use crate::{Voxel, OPAQUE};
+
 use super::{
     side::{Axis, Side},
-    Chunk, Quad, QuadGroups, Vox, OPAQUE,
+    Chunk, Quad, QuadGroups,
 };
 
 pub struct Face<'a> {
@@ -248,7 +250,7 @@ impl<'a> Deref for FaceWithAO<'a> {
     }
 }
 
-pub(crate) fn side_aos<V: Vox>(neighbors: [V; 8]) -> [u32; 4] {
+pub(crate) fn side_aos(neighbors: [Voxel; 8]) -> [u32; 4] {
     let ns = [
         neighbors[0].visibility() == OPAQUE,
         neighbors[1].visibility() == OPAQUE,

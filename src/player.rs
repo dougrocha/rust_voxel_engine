@@ -44,7 +44,7 @@ impl Default for MovementSettings {
     fn default() -> Self {
         Self {
             mouse_sensitivity: 0.00012,
-            walk_speed: 12.,
+            walk_speed: 50.,
             run_speed: 24.,
             friction: 0.8,
             gravity: 9.81,

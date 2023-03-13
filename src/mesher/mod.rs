@@ -1,16 +1,7 @@
+use crate::{Chunk, Visibility, EMPTY, OPAQUE, TRANSPARENT};
+
 pub mod face;
 pub mod side;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Visibility {
-    Empty,
-    Transparent,
-    Opaque,
-}
-
-pub trait Vox: Eq {
-    fn visibility(&self) -> Visibility;
-}
 
 const CHUNK_SIZE: usize = 16;
 
@@ -84,61 +75,5 @@ pub fn generate_mesh_buffer(chunk: &Chunk, buffer: &mut QuadGroups) {
                 }
             }
         }
-    }
-}
-
-pub const EMPTY: Visibility = Visibility::Empty;
-pub const OPAQUE: Visibility = Visibility::Opaque;
-pub const TRANSPARENT: Visibility = Visibility::Transparent;
-
-#[derive(Copy, Clone, Default, PartialEq, Eq)]
-pub enum Voxel {
-    #[default]
-    Empty,
-    Opaque(u16),
-    Transparent(u16),
-}
-
-impl Vox for Voxel {
-    fn visibility(&self) -> Visibility {
-        match self {
-            Self::Empty => Visibility::Empty,
-            Self::Opaque(_) => Visibility::Opaque,
-            Self::Transparent(_) => Visibility::Transparent,
-        }
-    }
-}
-
-pub struct Chunk {
-    pub voxels: Box<[Voxel; 16 * 16 * 16]>,
-}
-
-impl Default for Chunk {
-    fn default() -> Self {
-        Self {
-            voxels: Box::new([Voxel::default(); 16 * 16 * 16]),
-        }
-    }
-}
-
-impl Chunk {
-    pub fn linearize(x: usize, y: usize, z: usize) -> usize {
-        x + (y * CHUNK_SIZE) + (z * CHUNK_SIZE ^ 2)
-    }
-
-    pub fn delinearize(mut index: usize) -> (usize, usize, usize) {
-        let z = index / (CHUNK_SIZE ^ 2);
-        index -= z * (CHUNK_SIZE ^ 2);
-
-        let y = index / CHUNK_SIZE;
-        index -= y * CHUNK_SIZE;
-
-        let x = index;
-
-        (x, y, z)
-    }
-
-    pub fn get(&self, x: usize, y: usize, z: usize) -> Voxel {
-        self.voxels[Chunk::linearize(x, y, z)]
     }
 }
