@@ -1,28 +1,18 @@
-pub mod world;
+mod mesher;
+mod player;
+
+use std::sync::Arc;
 
 use bevy::{
     prelude::*,
     render::{mesh::Indices, render_resource::PrimitiveTopology},
-    tasks::{AsyncComputeTaskPool, Task},
+    utils::hashbrown::HashMap,
 };
-
-use bevy_voxel_game::{
-    player::{MovementSettings, Player, PlayerPlugin},
-    world::{
-        chunk::{
-            chunks::Chunk, create_chunk, destroy_chunks, mesh::create_chunk_mesh, ChunkEntities,
-            ChunkPosition, ChunkQueue, CHUNK_SIZE,
-        },
-        world::{ChunkMap, ViewDistance},
-    },
-};
-use futures_lite::future;
-
-const CLEAR_COLOR: Color = Color::rgb(0.4, 0.4, 0.4);
+use mesher::{generate_mesh, Chunk, Voxel};
+use player::PlayerPlugin;
 
 fn main() {
     App::new()
-        .insert_resource(ClearColor(CLEAR_COLOR))
         .insert_resource(Msaa::default())
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -31,173 +21,113 @@ fn main() {
             }),
             ..default()
         }))
-        .insert_resource(MovementSettings {
-            walk_speed: 30.0,
-            ..default()
-        })
         // Game State
-        .add_plugin(WorldGenerationPlugin)
-        .add_startup_system(setup_light)
-        .add_startup_system(setup_world)
         .add_plugin(PlayerPlugin)
+        .add_plugin(WorldGeneratorPlugin)
         .run();
 }
 
-/// set up a simple 3D scene
-fn setup_light(mut commands: Commands) {
-    //sky light
-    commands.insert_resource(AmbientLight {
-        color: Color::WHITE,
-        brightness: 0.80,
-    });
-}
+struct WorldGeneratorPlugin;
 
-fn setup_world(
-    commands: Commands,
-    meshes: ResMut<Assets<Mesh>>,
-    materials: ResMut<Assets<StandardMaterial>>,
-    mut chunk_queue: ResMut<ChunkQueue>,
-) {
-    // add one chunk to queue
-
-    //     let mut world = ChunkWorld::new();
-
-    //     world.render(commands, meshes, materials);
-}
-
-#[derive(Resource)]
-struct GameSettings {
-    view_distance: u32,
-}
-
-impl Default for GameSettings {
-    fn default() -> Self {
-        Self { view_distance: 12 }
+impl Plugin for WorldGeneratorPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_startup_system(setup_world);
     }
 }
 
-fn update_chunks(
-    mut chunk_queue: ResMut<ChunkQueue>,
-    player: Query<&Transform, With<Player>>,
-    chunk_entities: ResMut<ChunkEntities>,
-    game_settings: Res<GameSettings>,
+const CHUNK_SIZE: usize = 16;
+
+#[derive(Resource)]
+struct World {
+    chunks: HashMap<IVec3, Arc<Chunk>>,
+}
+
+#[derive(Component)]
+struct NeedsMeshUpdate;
+
+fn setup_world(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    test: Query,
 ) {
-    let player_pos = player.single().translation;
-    let player_chunk = ChunkPosition::from_world_position(Vec3 {
-        x: player_pos.x,
-        y: player_pos.y,
-        z: player_pos.z,
-    });
+    let mut chunk = Chunk::default();
 
-    let view_distance = game_settings.view_distance as i32;
+    for x in 0..CHUNK_SIZE {
+        for y in 0..CHUNK_SIZE {
+            for z in 0..CHUNK_SIZE {
+                let voxel = if y == 8 {
+                    Voxel::Opaque(2)
+                } else {
+                    Voxel::Empty
+                };
 
-    for x in -view_distance..=view_distance {
-        for z in -view_distance..=view_distance {
-            let chunk_pos = ChunkPosition {
-                x: player_chunk.x + x,
-                z: player_chunk.z + z,
-            };
+                let index = Chunk::linearize(x, y, z);
 
-            if !chunk_entities.contains_key(&chunk_pos) {
-                chunk_queue.create.push(chunk_pos);
+                chunk.voxels[index] = voxel;
             }
         }
     }
 
-    // remove chunks that are too far away
-    for loaded_chunk in chunk_entities.iter_keys() {
-        if (loaded_chunk.x - player_chunk.x).abs() > view_distance
-            || (loaded_chunk.z - player_chunk.z).abs() > view_distance
-        {
-            chunk_queue.remove.push(*loaded_chunk);
-        }
+    let result = generate_mesh(&chunk);
+
+    let mut positions = Vec::new();
+    let mut indices = Vec::new();
+    let mut normals = Vec::new();
+    let mut uvs = Vec::new();
+    let mut aos = Vec::new();
+
+    for face in result.iter_with_ao(&chunk) {
+        positions.extend_from_slice(&face.positions(1.0)); // Voxel size is 1m
+        indices.extend_from_slice(&face.indices(positions.len() as u32));
+        normals.extend_from_slice(&face.normals());
+        uvs.extend_from_slice(&face.uvs(false, true));
+        aos.extend_from_slice(&face.aos());
     }
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+
+    mesh.set_indices(Some(Indices::U32(indices)));
+
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, ao_to_vec4(&aos));
+
+    commands.spawn(PbrBundle {
+        mesh: meshes.add(mesh),
+        material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+        transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+        ..Default::default()
+    });
+
+    // cube
+    commands.spawn(PbrBundle {
+        mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
+        material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+        transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+        ..Default::default()
+    });
+
+    // ambient light
+    commands.spawn(PointLightBundle {
+        transform: Transform::from_xyz(50.0, 50.0, 50.0),
+        point_light: PointLight {
+            intensity: 600000.,
+            range: 100.,
+            ..default()
+        },
+        ..default()
+    });
 }
 
-pub struct WorldGenerationPlugin;
-
-impl Plugin for WorldGenerationPlugin {
-    fn build(&self, app: &mut App) {
-        app.insert_resource(ChunkMap::new())
-            .init_resource::<ChunkEntities>()
-            .init_resource::<ChunkQueue>()
-            .init_resource::<GameSettings>()
-            .add_systems(
-                (
-                    update_chunks,
-                    create_chunk,
-                    generate_chunk,
-                    render_chunk,
-                    destroy_chunks,
-                )
-                    .chain(),
-            );
-    }
-}
-
-#[derive(Component)]
-struct ChunkMeshTask(Task<(Mesh, ChunkPosition)>);
-
-pub fn generate_chunk(
-    mut commands: Commands,
-    chunk_entities: ResMut<ChunkEntities>,
-    mut chunk_map: ResMut<ChunkMap>,
-) {
-    let thread_pool = AsyncComputeTaskPool::get();
-
-    // generate each entity
-    for (chunk_pos, chunk_entity) in chunk_entities.iter() {
-        chunk_map.set(*chunk_pos, Chunk::new(*chunk_pos));
-
-        let chunk = chunk_map.get(chunk_pos).unwrap();
-
-        let chunk_position = *chunk_pos;
-
-        let task = thread_pool.spawn(async move {
-            let chunk_mesh = create_chunk_mesh(&chunk);
-
-            let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
-            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, chunk_mesh.vertices);
-            mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, chunk_mesh.normals);
-            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, chunk_mesh.uvs);
-
-            mesh.set_indices(Some(Indices::U32(chunk_mesh.indices)));
-
-            (mesh, chunk_position)
-        });
-
-        commands
-            .get_entity(*chunk_entity)
-            .unwrap()
-            .insert(ChunkMeshTask(task));
-    }
-}
-
-fn render_chunk(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut mesh_tasks: Query<(Entity, &mut ChunkMeshTask)>,
-) {
-    for (entity, mut task) in &mut mesh_tasks {
-        if let Some((mesh, chunk_position)) = future::block_on(future::poll_once(&mut task.0)) {
-            commands.entity(entity).insert((
-                PbrBundle {
-                    mesh: meshes.add(mesh),
-                    material: materials.add(StandardMaterial {
-                        base_color: Color::GREEN,
-                        ..Default::default()
-                    }),
-                    transform: Transform::from_translation(Vec3::new(
-                        chunk_position.x as f32 * CHUNK_SIZE as f32,
-                        0.0,
-                        chunk_position.z as f32 * CHUNK_SIZE as f32,
-                    )),
-                    ..Default::default()
-                },
-                // Only render the wireframe of the mesh for testing purposes
-                // Wireframe,
-            ));
-        }
-    }
+fn ao_to_vec4(ao: &[u32]) -> Vec<[f32; 4]> {
+    ao.iter()
+        .map(|val| match val {
+            0 => [0.1, 0.1, 0.1, 1.0],
+            1 => [0.25, 0.25, 0.25, 1.0],
+            2 => [0.5, 0.5, 0.5, 1.0],
+            _ => [1.0, 1.0, 1.0, 1.0],
+        })
+        .collect()
 }
