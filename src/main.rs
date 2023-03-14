@@ -1,20 +1,22 @@
 mod mesher;
 mod player;
 
-use std::sync::Arc;
+use std::{ops::Div, sync::Arc};
 
 use bevy::{
-    diagnostic::FrameTimeDiagnosticsPlugin,
+    diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
+    math::Vec3Swizzles,
     prelude::*,
     render::{mesh::Indices, render_resource::PrimitiveTopology},
     tasks::{AsyncComputeTaskPool, Task},
-    utils::hashbrown::HashMap,
 };
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use futures_lite::future;
+use hashbrown::HashMap;
 use mesher::generate_mesh;
 use noise::{NoiseFn, OpenSimplex};
 use player::{Player, PlayerPlugin};
+use rayon::prelude::*;
 
 fn main() {
     App::new()
@@ -26,24 +28,22 @@ fn main() {
             }),
             ..default()
         }))
+        .add_plugin(LogDiagnosticsPlugin::default())
+        .add_plugin(FrameTimeDiagnosticsPlugin::default())
+        .add_plugin(EntityCountDiagnosticsPlugin::default())
         .add_plugin(WorldInspectorPlugin::default())
         // Game State
         .add_plugin(PlayerPlugin)
         .init_resource::<World>()
         .insert_resource(RenderDistance {
-            horizontal: 10,
-            vertical: 6,
+            horizontal: 6,
+            vertical: 2,
         })
         .add_startup_system(setup_world)
-        .add_systems(
-            (
-                poll_chunks_in_view,
-                load_meshes_for_chunks,
-                poll_chunks_outside_view,
-                render_chunks,
-            )
-                .chain(),
-        )
+        .add_system(poll_chunks_in_view)
+        .add_system(load_meshes_for_chunks)
+        .add_system(render_chunks)
+        .add_system(poll_chunks_outside_view)
         .run();
 }
 
@@ -76,7 +76,7 @@ pub struct World {
 impl Default for World {
     fn default() -> Self {
         Self {
-            chunks: HashMap::new(),
+            chunks: HashMap::default(),
         }
     }
 }
@@ -113,27 +113,46 @@ impl World {
         center: &Vec3,
         render_distance: &RenderDistance,
     ) -> Vec<IVec3> {
-        // look through all chunks in the world, and return the positions of the ones that are outside the render distance
-        self.chunks
-            .iter()
-            .filter_map(|(position, _)| {
-                let horizontal = render_distance.horizontal as i32;
-                let vertical = render_distance.vertical as i32;
+        let mut vec = Vec::new();
 
-                let x = (center.x as i32 - position.x * CHUNK_SIZE as i32).abs();
-                let y = (center.y as i32 - position.y * CHUNK_SIZE as i32).abs();
-                let z = (center.z as i32 - position.z * CHUNK_SIZE as i32).abs();
+        for (chunk_position, _) in self.chunks.iter() {
+            let outside = chunk_position
+                .xz()
+                .as_vec2()
+                .distance(center.xz() / CHUNK_SIZE as f32)
+                .abs()
+                .floor() as i32
+                > render_distance.horizontal as i32
+                || (chunk_position.y as i32 - (center.y.div(CHUNK_SIZE as f32)) as i32).abs()
+                    > render_distance.vertical as i32;
 
-                if x > horizontal * CHUNK_SIZE as i32
-                    || y > vertical * CHUNK_SIZE as i32
-                    || z > horizontal * CHUNK_SIZE as i32
-                {
-                    Some(*position)
-                } else {
-                    None
-                }
-            })
-            .collect()
+            if outside {
+                vec.push(*chunk_position);
+            }
+        }
+
+        vec
+
+        // self.chunks
+        //     .iter()
+        //     .filter_map(|(position, _)| {
+        //         let horizontal = render_distance.horizontal as i32;
+        //         let vertical = render_distance.vertical as i32;
+
+        //         let x = (center.x as i32 - position.x * CHUNK_SIZE as i32).abs();
+        //         let y = (center.y as i32 - position.y * CHUNK_SIZE as i32).abs();
+        //         let z = (center.z as i32 - position.z * CHUNK_SIZE as i32).abs();
+
+        //         if x > horizontal * CHUNK_SIZE as i32
+        //             || y > vertical * CHUNK_SIZE as i32
+        //             || z > horizontal * CHUNK_SIZE as i32
+        //         {
+        //             Some(position.clone())
+        //         } else {
+        //             None
+        //         }
+        //     })
+        //     .collect()
     }
 }
 
@@ -204,8 +223,6 @@ pub fn poll_chunks_in_view(
     mut world: ResMut<World>,
     render_distance: Res<RenderDistance>,
 ) {
-    // println!("chunks in world: {}", world.chunks.len());
-
     let player_position = player.single().translation;
 
     let chunks = World::chunks_in_render_distance(&player_position, &render_distance);
@@ -263,16 +280,10 @@ pub fn poll_chunks_outside_view(
     let chunks = world.chunks_outside_render_distance(&player_position, &render_distance);
 
     for chunk_position in chunks {
-        if let Some(chunk) = world.chunks.get(&chunk_position) {
-            let chunk = Arc::clone(&chunk);
-
-            world.chunks.remove(&chunk_position);
-
-            commands
-                .get_entity(chunk.entity)
-                .ok_or("Chunk entity not found")
-                .unwrap()
-                .despawn_recursive();
+        if let Some(chunk) = world.chunks.remove(&chunk_position) {
+            if let Some(mut entity) = commands.get_entity(chunk.clone().entity) {
+                entity.despawn();
+            }
         }
     }
 }
@@ -348,17 +359,17 @@ fn load_meshes_for_chunks(mut commands: Commands, mut world: ResMut<World>) {
             (mesh, position)
         });
 
-        let mut chunk = Arc::make_mut(chunk);
-        chunk.spawned = true;
-
         if let Some(mut chunk_entity) = commands.get_entity(chunk.entity) {
             chunk_entity.insert(MeshingTask(task));
         }
+
+        let mut chunk = Arc::make_mut(chunk);
+        chunk.spawned = true;
     }
 }
 
 fn ao_to_vec4(ao: &[u32]) -> Vec<[f32; 4]> {
-    ao.iter()
+    ao.par_iter()
         .map(|val| match val {
             0 => [0.1, 0.1, 0.1, 1.0],
             1 => [0.25, 0.25, 0.25, 1.0],
