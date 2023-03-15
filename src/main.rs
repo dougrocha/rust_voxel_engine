@@ -14,7 +14,7 @@ use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use futures_lite::future;
 use hashbrown::HashMap;
 use mesher::generate_mesh;
-use noise::{NoiseFn, OpenSimplex};
+use noise::{NoiseFn, Perlin, RidgedMulti};
 use player::{Player, PlayerPlugin};
 use rayon::prelude::*;
 
@@ -31,19 +31,31 @@ fn main() {
         .add_plugin(LogDiagnosticsPlugin::default())
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
         .add_plugin(EntityCountDiagnosticsPlugin::default())
+        .add_plugin(bevy::diagnostic::LogDiagnosticsPlugin::default())
+        .add_plugin(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
+        .add_plugin(bevy::diagnostic::EntityCountDiagnosticsPlugin::default())
         .add_plugin(WorldInspectorPlugin::default())
         // Game State
         .add_plugin(PlayerPlugin)
         .init_resource::<World>()
         .insert_resource(RenderDistance {
             horizontal: 6,
-            vertical: 2,
+            vertical: 4,
         })
         .add_startup_system(setup_world)
         .add_system(poll_chunks_in_view)
         .add_system(load_meshes_for_chunks)
         .add_system(render_chunks)
         .add_system(poll_chunks_outside_view)
+        .add_systems(
+            (
+                poll_chunks_in_view,
+                poll_chunks_outside_view,
+                load_meshes_for_chunks,
+                render_chunks,
+            )
+                .chain(),
+        )
         .run();
 }
 
@@ -154,6 +166,23 @@ impl World {
         //     })
         //     .collect()
     }
+
+    pub fn is_outside_render_distance(
+        center: &Vec3,
+        chunk_position: &IVec3,
+        render_distance: &RenderDistance,
+    ) -> bool {
+        let horizontal = render_distance.horizontal as i32;
+        let vertical = render_distance.vertical as i32;
+
+        let x = (center.x as i32 - chunk_position.x * CHUNK_SIZE as i32).abs();
+        let y = (center.y as i32 - chunk_position.y * CHUNK_SIZE as i32).abs();
+        let z = (center.z as i32 - chunk_position.z * CHUNK_SIZE as i32).abs();
+
+        x > horizontal * CHUNK_SIZE as i32
+            || y > vertical * CHUNK_SIZE as i32
+            || z > horizontal * CHUNK_SIZE as i32
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -227,7 +256,10 @@ pub fn poll_chunks_in_view(
 
     let chunks = World::chunks_in_render_distance(&player_position, &render_distance);
 
-    let noise = OpenSimplex::new(123);
+    let mut ridged_multi = RidgedMulti::<Perlin>::new(3246725);
+
+    ridged_multi.frequency = 0.3;
+    ridged_multi.octaves = 3;
 
     for chunk_position in chunks {
         if !world.chunks.contains_key(&chunk_position) {
@@ -243,13 +275,12 @@ pub fn poll_chunks_in_view(
             for x in 0..CHUNK_SIZE {
                 for y in 0..CHUNK_SIZE {
                     for z in 0..CHUNK_SIZE {
-                        let voxel = if noise.get([
-                            (chunk_position.x * CHUNK_SIZE as i32 + x as i32) as f64 / 16.,
-                            (chunk_position.y * CHUNK_SIZE as i32 + y as i32) as f64 / 16.,
-                            (chunk_position.z * CHUNK_SIZE as i32 + z as i32) as f64 / 16.,
-                        ]) * 100.
-                            > 0.5
-                        {
+                        let height = (ridged_multi.get([
+                            (chunk_position.x * (CHUNK_SIZE + x) as i32) as f64 / 16.0,
+                            (chunk_position.z * (CHUNK_SIZE + z) as i32) as f64 / 16.0,
+                        ]) * 8.0) as i32;
+
+                        let voxel = if y as i32 + chunk_position.y * (CHUNK_SIZE as i32) < height {
                             Voxel::Opaque
                         } else {
                             Voxel::Empty
@@ -272,16 +303,16 @@ pub fn poll_chunks_in_view(
 pub fn poll_chunks_outside_view(
     mut commands: Commands,
     player: Query<&Transform, With<Player>>,
-    mut world: ResMut<World>,
+    world: Res<World>,
     render_distance: Res<RenderDistance>,
 ) {
     let player_position = player.single().translation;
 
-    let chunks = world.chunks_outside_render_distance(&player_position, &render_distance);
+    for (chunk_position, chunk) in world.chunks.iter() {
+        if World::is_outside_render_distance(&player_position, &chunk_position, &render_distance) {
+            let chunk = Arc::clone(chunk);
 
-    for chunk_position in chunks {
-        if let Some(chunk) = world.chunks.remove(&chunk_position) {
-            if let Some(mut entity) = commands.get_entity(chunk.clone().entity) {
+            if let Some(mut entity) = commands.get_entity(chunk.entity) {
                 entity.despawn();
             }
         }

@@ -38,7 +38,7 @@ pub fn generate_mesh_buffer(chunk: &Chunk, buffer: &mut QuadGroups) {
                     && (z > 0 && z < CHUNK_SIZE - 1)
                 {
                     match voxel.visibility() {
-                        Visibility::Empty => continue,
+                        EMPTY => continue,
                         visibility => {
                             let neighbors = [
                                 chunk.get(x - 1, y, z),
@@ -59,7 +59,7 @@ pub fn generate_mesh_buffer(chunk: &Chunk, buffer: &mut QuadGroups) {
 
                                     (TRANSPARENT, TRANSPARENT) => voxel != neighbor,
 
-                                    (_, _) => false,
+                                    (_, _) => true,
                                 };
 
                                 if generate {
