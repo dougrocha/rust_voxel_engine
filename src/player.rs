@@ -8,6 +8,10 @@ use bevy::{
 #[derive(Component)]
 pub struct Player;
 
+impl Player {
+    pub fn testingtesting() {}
+}
+
 // Keep track of mouse events, pitch, yaw
 #[derive(Resource, Default)]
 pub struct MouseState {
