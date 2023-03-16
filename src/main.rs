@@ -1,11 +1,11 @@
 mod chunk;
+mod debug;
 mod player;
 mod position;
-mod world_manager;
 
-use bevy::{diagnostic, prelude::*};
-use bevy_inspector_egui::quick::WorldInspectorPlugin;
+use bevy::prelude::*;
 use chunk::ChunkPlugin;
+use debug::DebugPlugin;
 use player::PlayerPlugin;
 
 fn main() {
@@ -18,10 +18,7 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugin(diagnostic::LogDiagnosticsPlugin::default())
-        .add_plugin(diagnostic::FrameTimeDiagnosticsPlugin::default())
-        .add_plugin(diagnostic::EntityCountDiagnosticsPlugin::default())
-        .add_plugin(WorldInspectorPlugin::default())
+        .add_plugin(DebugPlugin)
         // Game State
         .add_plugin(PlayerPlugin)
         .add_plugin(ChunkPlugin)

@@ -6,7 +6,7 @@ use bevy::{
 use crate::{
     chunk::{
         components::{Chunk, VoxelContainer},
-        RenderDistance, World,
+        resources::{RenderDistance, World},
     },
     position::positions_in_radius,
 };

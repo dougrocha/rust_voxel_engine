@@ -2,12 +2,13 @@ use std::ops::Mul;
 
 use bevy::prelude::*;
 
-use crate::{player::Player, position::world_to_chunk, world_manager::WorldManager};
+use crate::{player::components::Player, position::world_to_chunk};
 
 use super::{
     components::{AwaitingMesh, Chunk, DestroyChunk, VoxelContainer},
-    resources::{ChunkQueue, PlayerChunk},
-    RenderDistance, World, CHUNK_SIZE,
+    resources::{self, ChunkQueue, PlayerChunk, World},
+    world_manager::WorldManager,
+    RenderDistance, CHUNK_SIZE,
 };
 
 pub fn should_load_chunks(player_chunk: Res<PlayerChunk>) -> bool {
@@ -45,7 +46,7 @@ pub fn destroy_chunk_poll(
 pub fn destroy_chunks(
     mut commands: Commands,
     destroy_chunk_queue: Query<(&Chunk, Entity), With<DestroyChunk>>,
-    mut world: ResMut<World>,
+    mut world: ResMut<resources::World>,
 ) {
     for (chunk, entity) in destroy_chunk_queue.iter() {
         commands.entity(entity).remove::<DestroyChunk>();
