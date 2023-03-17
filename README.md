@@ -7,3 +7,4 @@ This is a project I'm working to learn rust and voxel engines. It's a work in pr
 [How to mesh](https://playspacefarer.com/category/dev-logs/)
 [Minecraft generation in a nut shell](https://www.youtube.com/watch?v=CSa5O6knuwI)
 [Minecraft 1.18 snapshot bts](https://youtu.be/TycBrFKEteU)
+[How minecraft is feat](https://youtu.be/fjZAgoxFKiQ)
