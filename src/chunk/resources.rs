@@ -24,11 +24,11 @@ pub struct ChunkQueue {
  * Will be random by default
  */
 #[derive(Resource)]
-pub struct WorldSeed(pub u64);
+pub struct WorldSeed(pub u32);
 
 impl Default for WorldSeed {
     fn default() -> Self {
-        Self(rand::thread_rng().gen_range(0..u64::MAX))
+        Self(rand::thread_rng().gen_range(0..u32::MAX))
     }
 }
 

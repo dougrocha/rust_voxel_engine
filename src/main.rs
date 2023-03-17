@@ -18,6 +18,7 @@ fn main() {
             }),
             ..default()
         }))
+        // Debug
         .add_plugin(DebugPlugin)
         // Game State
         .add_plugin(PlayerPlugin)

@@ -1,12 +1,17 @@
 use std::ops::Mul;
 
-use bevy::prelude::*;
+use bevy::{
+    prelude::*,
+    render::{mesh::Indices, render_resource::PrimitiveTopology},
+};
+use noise::{MultiFractal, NoiseFn, OpenSimplex, RidgedMulti};
 
-use crate::{player::components::Player, position::world_to_chunk};
+use crate::{chunk::mesh::Voxel, player::components::Player, position::world_to_chunk};
 
 use super::{
-    components::{AwaitingMesh, Chunk, DestroyChunk, VoxelContainer},
-    resources::{self, ChunkQueue, PlayerChunk, World},
+    components::{AwaitingMesh, BaseChunk, Chunk, DestroyChunk, VoxelContainer},
+    mesh::{generate_mesh, VoxelType},
+    resources::{self, ChunkQueue, PlayerChunk, World, WorldSeed},
     world_manager::WorldManager,
     RenderDistance, CHUNK_SIZE,
 };
@@ -30,7 +35,7 @@ pub fn update_player_chunk(
 
 pub fn destroy_chunk_poll(
     mut commands: Commands,
-    chunks: Query<(&Chunk, Entity)>,
+    chunks: Query<(&BaseChunk, Entity)>,
     render_distance: Res<RenderDistance>,
     player_chunk: Res<PlayerChunk>,
 ) {
@@ -45,12 +50,12 @@ pub fn destroy_chunk_poll(
 
 pub fn destroy_chunks(
     mut commands: Commands,
-    destroy_chunk_queue: Query<(&Chunk, Entity), With<DestroyChunk>>,
+    destroy_chunk_queue: Query<(&BaseChunk, Entity), With<DestroyChunk>>,
     mut world: ResMut<resources::World>,
 ) {
     for (chunk, entity) in destroy_chunk_queue.iter() {
         commands.entity(entity).remove::<DestroyChunk>();
-        commands.entity(entity).remove::<Chunk>();
+        commands.entity(entity).remove::<BaseChunk>();
         world.remove_chunk(&chunk.position);
         commands.entity(entity).despawn_recursive();
     }
@@ -80,44 +85,91 @@ pub fn generate_chunk(
     mut commands: Commands,
     mut chunk_queue: ResMut<ChunkQueue>,
     world: Res<World>,
+    world_seed: Res<WorldSeed>,
 ) {
     for chunk_position in chunk_queue.generate.drain(..) {
         // do some generation here
 
         let chunk_entity = world.get_entity(chunk_position).unwrap();
 
+        let mut chunk = BaseChunk {
+            position: chunk_position,
+            voxels: VoxelContainer::new(),
+            entities: Vec::new(),
+        };
+
+        let ridged_noise: RidgedMulti<OpenSimplex> = RidgedMulti::new(world_seed.0)
+            .set_octaves(3)
+            .set_frequency(0.00622);
+
+        for x in 0..CHUNK_SIZE {
+            for y in 0..CHUNK_SIZE {
+                for z in 0..CHUNK_SIZE {
+                    let global_x: i32 = (chunk_position.x * CHUNK_SIZE as i32 + x as i32) as i32;
+                    let global_y: i32 = (chunk_position.y * CHUNK_SIZE as i32 + y as i32) as i32;
+                    let global_z: i32 = (chunk_position.z * CHUNK_SIZE as i32 + z as i32) as i32;
+
+                    let noise_val =
+                        ridged_noise.get([global_x as f64, global_y as f64, global_z as f64])
+                            * 45.0;
+
+                    let voxel = if global_y as f64 <= noise_val {
+                        VoxelType::Opaque(1)
+                    } else {
+                        VoxelType::Empty
+                    };
+
+                    chunk.voxels.0
+                        [BaseChunk::linearize(UVec3::new(x as u32, y as u32, z as u32))] = voxel;
+                }
+            }
+        }
+
         commands
             .entity(chunk_entity)
-            .insert(Chunk {
-                position: chunk_position,
-                voxels: VoxelContainer::new(),
-                entities: Vec::new(),
-            })
+            .insert(chunk)
             .insert(AwaitingMesh);
     }
 }
 
-pub fn generate_mesh(
+pub fn handle_chunk_mesh(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    chunks: Query<(&Chunk, Entity), With<AwaitingMesh>>,
+    chunks: Query<(&BaseChunk, Entity), With<AwaitingMesh>>,
 ) {
     for (chunk, entity) in chunks.iter() {
+        let result = generate_mesh(chunk);
+
+        let mut positions = Vec::new();
+        let mut indices = Vec::new();
+        let mut normals = Vec::new();
+        let mut uvs = Vec::new();
+
+        for face in result.iter() {
+            positions.extend_from_slice(&face.positions(1.0)); // Voxel size is 1m
+            indices.extend_from_slice(&face.indices(positions.len() as u32));
+            normals.extend_from_slice(&face.normals());
+            uvs.extend_from_slice(&face.uvs(false, true));
+        }
+
+        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+
+        mesh.set_indices(Some(Indices::U32(indices)));
+
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+
         commands
             .entity(entity)
             .insert(PbrBundle {
-                mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
+                mesh: meshes.add(mesh),
                 material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
                 transform: Transform::from_translation(
                     chunk.position.as_vec3().mul(CHUNK_SIZE as f32),
                 ),
                 ..Default::default()
-            })
-            .insert(Chunk {
-                position: chunk.position,
-                voxels: VoxelContainer::new(),
-                entities: Vec::new(),
             })
             .remove::<AwaitingMesh>();
     }

@@ -5,7 +5,7 @@ use bevy::{
 
 use crate::{
     chunk::{
-        components::{Chunk, VoxelContainer},
+        components::{BaseChunk, VoxelContainer},
         resources::{RenderDistance, World},
     },
     position::positions_in_radius,
@@ -15,7 +15,7 @@ use crate::{
 pub struct WorldManager<'w, 's> {
     pub world: ResMut<'w, World>,
     pub render_distance: Res<'w, RenderDistance>,
-    pub chunks: Query<'w, 's, &'static Chunk>,
+    pub chunks: Query<'w, 's, &'static BaseChunk>,
 }
 
 impl<'w, 's> WorldManager<'w, 's> {
@@ -35,7 +35,7 @@ impl<'w, 's> WorldManager<'w, 's> {
         chunks
     }
 
-    pub fn chunks_in_render_distance(&mut self, chunk_position: IVec3) -> Vec<&Chunk> {
+    pub fn chunks_in_render_distance(&mut self, chunk_position: IVec3) -> Vec<&BaseChunk> {
         let mut chunks = Vec::new();
 
         for position in self
