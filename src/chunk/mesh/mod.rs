@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use super::{components::Chunk, CHUNK_SIZE};
 
 pub const EMPTY: Visibility = Visibility::Empty;
@@ -52,16 +54,32 @@ where
 {
     let mut buffer = QuadGroups::default();
 
-    for x in 0..CHUNK_SIZE {
-        for y in 0..CHUNK_SIZE {
-            for z in 0..CHUNK_SIZE {
+    generate_mesh_buffer(chunk, &mut buffer);
+
+    buffer
+}
+
+pub fn generate_mesh_buffer<C, T>(chunk: &C, buffer: &mut QuadGroups)
+where
+    C: Chunk<Output = T>,
+    T: Voxel,
+{
+    assert!(C::X >= 2);
+    assert!(C::Y >= 2);
+    assert!(C::Z >= 2);
+
+    buffer.clear();
+
+    for x in 0..C::X {
+        for y in 0..C::Y {
+            for z in 0..C::Z {
                 let x = x as u32;
                 let y = y as u32;
                 let z = z as u32;
 
-                if (x > 0 && x < (CHUNK_SIZE as u32) - 1)
-                    && (y > 0 && y < (CHUNK_SIZE as u32) - 1)
-                    && (z > 0 && z < (CHUNK_SIZE as u32) - 1)
+                if (x > 0 && x < (C::X as u32) - 1)
+                    && (y > 0 && y < (C::Y as u32) - 1)
+                    && (z > 0 && z < (C::Z as u32) - 1)
                 {
                     let voxel = chunk.get(x, y, z);
 
@@ -104,34 +122,34 @@ where
             }
         }
     }
-
-    buffer
 }
 
 pub enum Axis {
-    X,
-    Y,
-    Z,
+    XPositive,
+    XNegative,
+    YPositive,
+    YNegative,
+    ZPositive,
+    ZNegative,
 }
 
 pub struct Side {
     pub axis: Axis,
-    pub positive: bool,
 }
 
 impl Side {
-    pub fn new(axis: Axis, positive: bool) -> Self {
-        Self { axis, positive }
+    pub fn new(axis: Axis) -> Self {
+        Self { axis }
     }
 
     pub fn normal(&self) -> [f32; 3] {
-        match (&self.axis, &self.positive) {
-            (Axis::X, true) => [1.0, 0.0, 0.0],   // X+
-            (Axis::X, false) => [-1.0, 0.0, 0.0], // X-
-            (Axis::Y, true) => [0.0, 1.0, 0.0],   // Y+
-            (Axis::Y, false) => [0.0, -1.0, 0.0], // Y-
-            (Axis::Z, true) => [0.0, 0.0, 1.0],   // Z+
-            (Axis::Z, false) => [0.0, 0.0, -1.0], // Z-
+        match &self.axis {
+            Axis::XPositive => [1.0, 0.0, 0.0],  // X+
+            Axis::XNegative => [-1.0, 0.0, 0.0], // X-
+            Axis::YPositive => [0.0, 1.0, 0.0],  // Y+
+            Axis::YNegative => [0.0, -1.0, 0.0], // Y-
+            Axis::ZPositive => [0.0, 0.0, 1.0],  // Z+
+            Axis::ZNegative => [0.0, 0.0, -1.0], // Z-
         }
     }
 
@@ -151,38 +169,38 @@ impl<'a> Face<'a> {
     }
 
     pub fn positions(&self, voxel_size: f32) -> [[f32; 3]; 4] {
-        let positions = match (&self.side.axis, &self.side.positive) {
-            (Axis::X, false) => [
+        let positions = match &self.side.axis {
+            Axis::XNegative => [
                 [0.0, 0.0, 1.0],
                 [0.0, 0.0, 0.0],
                 [0.0, 1.0, 1.0],
                 [0.0, 1.0, 0.0],
             ],
-            (Axis::X, true) => [
+            Axis::XPositive => [
                 [1.0, 0.0, 0.0],
                 [1.0, 0.0, 1.0],
                 [1.0, 1.0, 0.0],
                 [1.0, 1.0, 1.0],
             ],
-            (Axis::Y, false) => [
+            Axis::YNegative => [
                 [0.0, 0.0, 1.0],
                 [1.0, 0.0, 1.0],
                 [0.0, 0.0, 0.0],
                 [1.0, 0.0, 0.0],
             ],
-            (Axis::Y, true) => [
+            Axis::YPositive => [
                 [0.0, 1.0, 1.0],
                 [0.0, 1.0, 0.0],
                 [1.0, 1.0, 1.0],
                 [1.0, 1.0, 0.0],
             ],
-            (Axis::Z, false) => [
+            Axis::ZNegative => [
                 [0.0, 0.0, 0.0],
                 [1.0, 0.0, 0.0],
                 [0.0, 1.0, 0.0],
                 [1.0, 1.0, 0.0],
             ],
-            (Axis::Z, true) => [
+            Axis::ZPositive => [
                 [1.0, 0.0, 1.0],
                 [0.0, 0.0, 1.0],
                 [1.0, 1.0, 1.0],
@@ -243,12 +261,12 @@ impl<'a> Face<'a> {
 impl From<usize> for Side {
     fn from(value: usize) -> Self {
         match value {
-            0 => Self::new(Axis::X, false), // X-
-            1 => Self::new(Axis::X, true),  // X+
-            2 => Self::new(Axis::Y, false), // Y-
-            3 => Self::new(Axis::Y, true),  // Y+
-            4 => Self::new(Axis::Z, false), // Z-
-            5 => Self::new(Axis::Z, true),  // Z+
+            0 => Self::new(Axis::XNegative), // X-
+            1 => Self::new(Axis::XPositive), // X+
+            2 => Self::new(Axis::YNegative), // Y-
+            3 => Self::new(Axis::YPositive), // Y+
+            4 => Self::new(Axis::ZNegative), // Z-
+            5 => Self::new(Axis::ZPositive), // Z+
             _ => unreachable!(),
         }
     }
@@ -265,4 +283,171 @@ impl QuadGroups {
                 quad,
             })
     }
+
+    pub fn clear(&mut self) {
+        self.groups.iter_mut().for_each(|g| g.clear());
+    }
+
+    pub fn iter_with_ao<'a, C, V>(&'a self, chunk: &'a C) -> impl Iterator<Item = FaceWithAO<'a>>
+    where
+        C: Chunk<Output = V>,
+        V: Voxel,
+    {
+        self.iter().map(|face| FaceWithAO::new(face, chunk))
+    }
+}
+
+pub(crate) fn face_aos<C, V>(face: &Face, chunk: &C) -> [u32; 4]
+where
+    C: Chunk<Output = V>,
+    V: Voxel,
+{
+    let [x, y, z] = face.voxel();
+
+    let x = x as u32;
+    let y = y as u32;
+    let z = z as u32;
+
+    match face.side.axis {
+        Axis::XNegative => side_aos([
+            chunk.get(x - 1, y, z + 1),
+            chunk.get(x - 1, y - 1, z + 1),
+            chunk.get(x - 1, y - 1, z),
+            chunk.get(x - 1, y - 1, z - 1),
+            chunk.get(x - 1, y, z - 1),
+            chunk.get(x - 1, y + 1, z - 1),
+            chunk.get(x - 1, y + 1, z),
+            chunk.get(x - 1, y + 1, z + 1),
+        ]),
+        Axis::XPositive => side_aos([
+            chunk.get(x + 1, y, z - 1),
+            chunk.get(x + 1, y - 1, z - 1),
+            chunk.get(x + 1, y - 1, z),
+            chunk.get(x + 1, y - 1, z + 1),
+            chunk.get(x + 1, y, z + 1),
+            chunk.get(x + 1, y + 1, z + 1),
+            chunk.get(x + 1, y + 1, z),
+            chunk.get(x + 1, y + 1, z - 1),
+        ]),
+        Axis::YNegative => side_aos([
+            chunk.get(x - 1, y - 1, z),
+            chunk.get(x - 1, y - 1, z + 1),
+            chunk.get(x, y - 1, z + 1),
+            chunk.get(x + 1, y - 1, z + 1),
+            chunk.get(x + 1, y - 1, z),
+            chunk.get(x + 1, y - 1, z - 1),
+            chunk.get(x, y - 1, z - 1),
+            chunk.get(x - 1, y - 1, z - 1),
+        ]),
+        Axis::YPositive => side_aos([
+            chunk.get(x, y + 1, z + 1),
+            chunk.get(x - 1, y + 1, z + 1),
+            chunk.get(x - 1, y + 1, z),
+            chunk.get(x - 1, y + 1, z - 1),
+            chunk.get(x, y + 1, z - 1),
+            chunk.get(x + 1, y + 1, z - 1),
+            chunk.get(x + 1, y + 1, z),
+            chunk.get(x + 1, y + 1, z + 1),
+        ]),
+        Axis::ZNegative => side_aos([
+            chunk.get(x - 1, y, z - 1),
+            chunk.get(x - 1, y - 1, z - 1),
+            chunk.get(x, y - 1, z - 1),
+            chunk.get(x + 1, y - 1, z - 1),
+            chunk.get(x + 1, y, z - 1),
+            chunk.get(x + 1, y + 1, z - 1),
+            chunk.get(x, y + 1, z - 1),
+            chunk.get(x - 1, y + 1, z - 1),
+        ]),
+        Axis::ZPositive => side_aos([
+            chunk.get(x + 1, y, z + 1),
+            chunk.get(x + 1, y - 1, z + 1),
+            chunk.get(x, y - 1, z + 1),
+            chunk.get(x - 1, y - 1, z + 1),
+            chunk.get(x - 1, y, z + 1),
+            chunk.get(x - 1, y + 1, z + 1),
+            chunk.get(x, y + 1, z + 1),
+            chunk.get(x + 1, y + 1, z + 1),
+        ]),
+    }
+}
+
+pub struct FaceWithAO<'a> {
+    face: Face<'a>,
+    aos: [u32; 4],
+}
+
+impl<'a> FaceWithAO<'a> {
+    pub fn new<C, V>(face: Face<'a>, chunk: &C) -> Self
+    where
+        C: Chunk<Output = V>,
+        V: Voxel,
+    {
+        let aos = face_aos(&face, chunk);
+        Self { face, aos }
+    }
+
+    pub fn aos(&self) -> [u32; 4] {
+        self.aos
+    }
+
+    pub fn indices(&self, start: u32) -> [u32; 6] {
+        let aos = self.aos();
+
+        if (aos[1] + aos[2]) > (aos[0] + aos[3]) {
+            [start, start + 2, start + 1, start + 1, start + 2, start + 3]
+        } else {
+            [start, start + 3, start + 1, start, start + 2, start + 3]
+        }
+    }
+}
+
+pub(crate) fn ao_value(side1: bool, corner: bool, side2: bool) -> u32 {
+    match (side1, corner, side2) {
+        (true, _, true) => 0,
+        (true, true, false) | (false, true, true) => 1,
+        (false, false, false) => 3,
+        _ => 2,
+    }
+}
+
+impl<'a> Deref for FaceWithAO<'a> {
+    type Target = Face<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.face
+    }
+}
+
+pub(crate) fn side_aos<V: Voxel>(neighbors: [V; 8]) -> [u32; 4] {
+    let ns = [
+        neighbors[0].visibility() == OPAQUE,
+        neighbors[1].visibility() == OPAQUE,
+        neighbors[2].visibility() == OPAQUE,
+        neighbors[3].visibility() == OPAQUE,
+        neighbors[4].visibility() == OPAQUE,
+        neighbors[5].visibility() == OPAQUE,
+        neighbors[6].visibility() == OPAQUE,
+        neighbors[7].visibility() == OPAQUE,
+    ];
+
+    [
+        ao_value(ns[0], ns[1], ns[2]),
+        ao_value(ns[2], ns[3], ns[4]),
+        ao_value(ns[6], ns[7], ns[0]),
+        ao_value(ns[4], ns[5], ns[6]),
+    ]
+}
+
+pub fn ao_to_color(ao: Vec<u32>) -> Vec<[f32; 4]> {
+    let mut res = Vec::new();
+    for value in ao {
+        match value {
+            0 => res.extend_from_slice(&[[0.1, 0.1, 0.1, 1.0]]),
+            1 => res.extend_from_slice(&[[0.25, 0.25, 0.25, 1.0]]),
+            2 => res.extend_from_slice(&[[0.5, 0.5, 0.5, 1.0]]),
+            _ => res.extend_from_slice(&[[1., 1., 1., 1.0]]),
+        }
+    }
+    res
 }
