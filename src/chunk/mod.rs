@@ -25,8 +25,8 @@ impl Plugin for ChunkPlugin {
             .init_resource::<PlayerChunk>()
             .init_resource::<WorldSeed>()
             .insert_resource(RenderDistance {
-                horizontal: 3,
-                vertical: 3,
+                horizontal: 8,
+                vertical: 6,
             })
             .add_systems((
                 update_player_chunk,
