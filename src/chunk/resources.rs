@@ -4,6 +4,9 @@ use bevy::{
     utils::hashbrown::HashMap,
 };
 use rand::Rng;
+use tokio::sync::mpsc::{Receiver, Sender};
+
+use super::components::BaseChunk;
 
 #[derive(Default, Resource)]
 pub struct PlayerChunk(pub IVec3);
@@ -14,10 +17,14 @@ impl PlayerChunk {
     }
 }
 
+#[derive(Resource)]
+pub struct ChunkChannel(pub (Sender<BaseChunk>, Receiver<BaseChunk>));
+
 #[derive(Default, Resource)]
 // Will be used for chunk generation
 pub struct ChunkQueue {
     pub generate: Vec<IVec3>,
+    pub await_mesh: Vec<(IVec3, BaseChunk)>,
 }
 
 /**
@@ -47,7 +54,7 @@ impl World {
     }
 
     pub fn remove_chunk(&mut self, position: &IVec3) {
-        self.chunks.remove(&position);
+        self.chunks.remove(position);
     }
 
     pub fn check_neighbors(&self, position: IVec3) -> bool {

@@ -1,14 +1,6 @@
-use std::fmt::Debug;
+use bevy::prelude::{Component, Entity, IVec3, UVec3};
 
-use bevy::{
-    prelude::{Component, Entity, IVec3, UVec3, Vec3},
-    reflect::Reflect,
-};
-
-use super::{
-    mesh::{Voxel, VoxelType},
-    CHUNK_SIZE, CHUNK_VOLUME,
-};
+use super::{mesh::VoxelType, CHUNK_SIZE, CHUNK_VOLUME};
 
 #[derive(Component)]
 pub struct AwaitingMesh;
