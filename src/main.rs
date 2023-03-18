@@ -3,7 +3,7 @@ mod debug;
 mod player;
 mod position;
 
-use bevy::prelude::*;
+use bevy::{prelude::*, window::PresentMode};
 use chunk::ChunkPlugin;
 use debug::DebugPlugin;
 use player::PlayerPlugin;
@@ -14,10 +14,15 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Voxel Engine".into(),
+                present_mode: PresentMode::AutoNoVsync,
                 ..default()
             }),
             ..default()
         }))
+        .insert_resource(AmbientLight {
+            color: Color::WHITE,
+            brightness: 1.0 / 5.0f32,
+        })
         // Debug
         .add_plugin(DebugPlugin)
         // Game State
