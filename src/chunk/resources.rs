@@ -1,12 +1,13 @@
 use bevy::{
     math::Vec3Swizzles,
-    prelude::{Entity, IVec3, Resource},
+    prelude::{Entity, IVec3, Mesh, Resource},
     utils::hashbrown::HashMap,
 };
 use rand::Rng;
+use rayon::prelude::*;
 use tokio::sync::mpsc::{Receiver, Sender};
 
-use super::components::BaseChunk;
+use super::components::{BaseChunk, ChunkBundle, ChunkWithNeighbors};
 
 #[derive(Default, Resource)]
 pub struct PlayerChunk(pub IVec3);
@@ -18,24 +19,32 @@ impl PlayerChunk {
 }
 
 #[derive(Resource)]
-pub struct ChunkChannel(pub (Sender<BaseChunk>, Receiver<BaseChunk>));
+pub struct ChunkChannel(pub (Sender<ChunkBundle>, Receiver<ChunkBundle>));
+
+pub struct MeshedChunk {
+    pub mesh: Mesh,
+    pub position: IVec3,
+}
+
+#[derive(Resource)]
+pub struct MeshChannel(pub (Sender<MeshedChunk>, Receiver<MeshedChunk>));
 
 #[derive(Default, Resource)]
 // Will be used for chunk generation
 pub struct ChunkQueue {
     pub generate: Vec<IVec3>,
-    pub await_mesh: Vec<(IVec3, BaseChunk)>,
+    pub await_mesh: Vec<(IVec3, BaseChunk, Box<[BaseChunk; 26]>)>,
 }
 
 /**
  * Will be random by default
  */
 #[derive(Resource)]
-pub struct WorldSeed(pub u32);
+pub struct WorldSeed(pub u64);
 
 impl Default for WorldSeed {
     fn default() -> Self {
-        Self(rand::thread_rng().gen_range(0..u32::MAX))
+        Self(rand::thread_rng().gen_range(0..u64::MAX))
     }
 }
 
@@ -59,6 +68,7 @@ impl World {
 
     pub fn check_neighbors(&self, position: IVec3) -> bool {
         let mut neighbors = Vec::new();
+
         for x in -1..=1 {
             for y in -1..=1 {
                 for z in -1..=1 {
@@ -69,11 +79,15 @@ impl World {
                 }
             }
         }
-        neighbors.iter().all(|pos| self.chunks.contains_key(pos))
+
+        neighbors
+            .par_iter()
+            .all(|pos| self.chunks.contains_key(pos))
     }
 
     pub fn get_neighbors(&self, position: IVec3) -> Vec<Entity> {
         let mut neighbors = Vec::new();
+
         for x in -1..=1 {
             for y in -1..=1 {
                 for z in -1..=1 {
@@ -86,6 +100,7 @@ impl World {
                 }
             }
         }
+
         neighbors
     }
 

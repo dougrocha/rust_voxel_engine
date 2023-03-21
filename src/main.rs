@@ -14,7 +14,7 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Voxel Engine".into(),
-                present_mode: PresentMode::AutoNoVsync,
+                present_mode: PresentMode::Mailbox,
                 ..default()
             }),
             ..default()

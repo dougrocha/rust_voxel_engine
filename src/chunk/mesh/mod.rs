@@ -1,6 +1,8 @@
 use std::ops::Deref;
 
-use super::{components::Chunk, CHUNK_SIZE};
+use bevy::prelude::UVec3;
+
+use super::components::Chunk;
 
 pub const EMPTY: Visibility = Visibility::Empty;
 pub const OPAQUE: Visibility = Visibility::Opaque;
@@ -70,51 +72,46 @@ where
 
     buffer.clear();
 
-    for x in 0..C::X {
-        for y in 0..C::Y {
-            for z in 0..C::Z {
+    for x in 1..C::X - 0 {
+        for y in 1..C::Y - 0 {
+            for z in 1..C::Z - 0 {
                 let x = x as u32;
                 let y = y as u32;
                 let z = z as u32;
 
-                if (x > 0 && x < (C::X as u32) - 1)
-                    && (y > 0 && y < (C::Y as u32) - 1)
-                    && (z > 0 && z < (C::Z as u32) - 1)
-                {
-                    let voxel = chunk.get(x, y, z);
+                let voxel = chunk.get(x, y, z);
 
-                    match voxel.visibility() {
-                        EMPTY => continue,
-                        visibility => {
-                            let neighbors = [
-                                chunk.get(x - 1, y, z),
-                                chunk.get(x + 1, y, z),
-                                chunk.get(x, y - 1, z),
-                                chunk.get(x, y + 1, z),
-                                chunk.get(x, y, z - 1),
-                                chunk.get(x, y, z + 1),
-                            ];
+                match voxel.visibility() {
+                    EMPTY => continue,
+                    visibility => {
+                        let neighbors = [
+                            chunk.get(x - 1, y, z),
+                            chunk.get(x + 1, y, z),
+                            chunk.get(x, y - 1, z),
+                            chunk.get(x, y + 1, z),
+                            chunk.get(x, y, z - 1),
+                            chunk.get(x, y, z + 1),
+                        ];
 
-                            for (i, neighbor) in neighbors.into_iter().enumerate() {
-                                let other = neighbor.visibility();
+                        for (i, neighbor) in neighbors.into_iter().enumerate() {
+                            let other = neighbor.visibility();
 
-                                let generate = match (visibility, other) {
-                                    (OPAQUE, EMPTY)
-                                    | (OPAQUE, TRANSPARENT)
-                                    | (TRANSPARENT, EMPTY) => true,
-
-                                    (TRANSPARENT, TRANSPARENT) => voxel != neighbor,
-
-                                    (_, _) => false,
-                                };
-
-                                if generate {
-                                    buffer.groups[i].push(Quad {
-                                        voxel: [x as usize, y as usize, z as usize],
-                                        width: 1,
-                                        height: 1,
-                                    });
+                            let generate = match (visibility, other) {
+                                (OPAQUE, EMPTY) | (OPAQUE, TRANSPARENT) | (TRANSPARENT, EMPTY) => {
+                                    true
                                 }
+
+                                (TRANSPARENT, TRANSPARENT) => voxel != neighbor,
+
+                                (_, _) => false,
+                            };
+
+                            if generate {
+                                buffer.groups[i].push(Quad {
+                                    voxel: [x as usize, y as usize, z as usize],
+                                    width: 1,
+                                    height: 1,
+                                });
                             }
                         }
                     }

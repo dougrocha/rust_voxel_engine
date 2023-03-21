@@ -8,9 +8,8 @@ pub struct DebugPlugin;
 
 impl Plugin for DebugPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugin(diagnostic::LogDiagnosticsPlugin::default())
-            .add_plugin(diagnostic::FrameTimeDiagnosticsPlugin::default())
-            .add_plugin(diagnostic::EntityCountDiagnosticsPlugin::default())
+        app.add_plugin(diagnostic::FrameTimeDiagnosticsPlugin)
+            .add_plugin(diagnostic::EntityCountDiagnosticsPlugin)
             .add_plugin(WorldInspectorPlugin::default())
             .add_startup_system(infotext_system)
             .add_system(change_text_system);

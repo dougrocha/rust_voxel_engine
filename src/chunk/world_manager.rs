@@ -5,7 +5,7 @@ use bevy::{
 
 use crate::{
     chunk::{
-        components::{BaseChunk, VoxelContainer},
+        components::{BaseChunk, ChunkBundle},
         resources::{RenderDistance, World},
     },
     position::positions_in_radius,
@@ -15,7 +15,7 @@ use crate::{
 pub struct WorldManager<'w, 's> {
     pub world: ResMut<'w, World>,
     pub render_distance: Res<'w, RenderDistance>,
-    pub chunks: Query<'w, 's, &'static BaseChunk>,
+    pub chunks: Query<'w, 's, &'static ChunkBundle>,
 }
 
 impl<'w, 's> WorldManager<'w, 's> {
@@ -35,7 +35,7 @@ impl<'w, 's> WorldManager<'w, 's> {
         chunks
     }
 
-    pub fn chunks_in_render_distance(&mut self, chunk_position: IVec3) -> Vec<&BaseChunk> {
+    pub fn chunks_in_render_distance(&mut self, chunk_position: IVec3) -> Vec<&ChunkBundle> {
         let mut chunks = Vec::new();
 
         for position in self
@@ -52,12 +52,12 @@ impl<'w, 's> WorldManager<'w, 's> {
         chunks
     }
 
-    pub fn neighboring_chunks(&self, chunk_position: IVec3) -> Option<Vec<&VoxelContainer>> {
+    pub fn neighboring_chunks(&self, chunk_position: IVec3) -> Option<Vec<BaseChunk>> {
         let mut chunks = Vec::new();
 
         for entity in self.world.get_neighbors(chunk_position) {
             if let Ok(chunk) = self.chunks.get(entity) {
-                chunks.push(&chunk.voxels);
+                chunks.push(chunk.data.clone());
             }
         }
 
