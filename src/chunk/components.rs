@@ -1,6 +1,6 @@
 use bevy::prelude::{Component, Entity, IVec3, UVec3};
 
-use super::{mesh::VoxelType, CHUNK_SIZE, CHUNK_VOLUME};
+use super::{mesh::VoxelType, ChunkPosition, CHUNK_SIZE, CHUNK_VOLUME};
 
 #[derive(Component)]
 pub struct AwaitingMesh;
@@ -44,7 +44,7 @@ pub trait Chunk {
 
 #[derive(Component)]
 pub struct ChunkBundle {
-    pub position: IVec3,
+    pub position: ChunkPosition,
     pub data: BaseChunk,
     pub entities: Vec<Entity>,
 }

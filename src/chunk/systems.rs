@@ -1,4 +1,4 @@
-use std::ops::Mul;
+use std::{ops::Mul, time::Instant};
 
 use bevy::{
     prelude::*,
@@ -18,7 +18,7 @@ use super::{
         self, ChunkChannel, ChunkQueue, MeshChannel, MeshedChunk, PlayerChunk, World, WorldSeed,
     },
     world_manager::WorldManager,
-    RenderDistance, CHUNK_SIZE,
+    ChunkPosition, RenderDistance, CHUNK_SIZE,
 };
 
 pub fn should_load_chunks(player_chunk: Res<PlayerChunk>) -> bool {
@@ -40,12 +40,12 @@ pub fn update_player_chunk(
 
 pub fn destroy_chunk_poll(
     mut commands: Commands,
-    chunks: Query<(&ChunkBundle, Entity)>,
+    chunks: Query<(&ChunkPosition, Entity)>,
     render_distance: Res<RenderDistance>,
     player_chunk: Res<PlayerChunk>,
 ) {
-    for (chunk, entity) in chunks.iter() {
-        if World::can_render(&player_chunk.0, &chunk.position, &render_distance) {
+    for (position, entity) in chunks.iter() {
+        if World::can_render(&player_chunk.0, position, &render_distance) {
             continue;
         } else {
             commands.entity(entity).insert(DestroyChunk);
@@ -55,13 +55,13 @@ pub fn destroy_chunk_poll(
 
 pub fn destroy_chunks(
     mut commands: Commands,
-    destroy_chunk_queue: Query<(&ChunkBundle, Entity), With<DestroyChunk>>,
+    destroy_chunk_queue: Query<(&ChunkPosition, Entity), With<DestroyChunk>>,
     mut world: ResMut<resources::World>,
 ) {
-    for (chunk, entity) in destroy_chunk_queue.iter() {
+    for (position, entity) in destroy_chunk_queue.iter() {
         commands.entity(entity).remove::<DestroyChunk>();
-        commands.entity(entity).remove::<ChunkBundle>();
-        world.remove_chunk(&chunk.position);
+        commands.entity(entity).remove::<ChunkPosition>();
+        world.remove_chunk(position);
         commands.entity(entity).despawn_recursive();
     }
 }
@@ -73,7 +73,7 @@ pub fn chunk_generation_poll(
     mut chunk_queue: ResMut<ChunkQueue>,
 ) {
     let position = player.single().translation;
-    let center_chunk = world_to_chunk(&position);
+    let center_chunk = ChunkPosition::from_player(&position);
 
     for chunk_position in world_manager.chunks_positions_in_render_distance(center_chunk) {
         if world_manager.world.get_entity(chunk_position).is_none() {
@@ -86,7 +86,7 @@ pub fn chunk_generation_poll(
     }
 }
 
-pub fn generate_chunk(chunk_position: IVec3, world_seed: u64) -> BaseChunk {
+pub fn generate_chunk(chunk_position: ChunkPosition, world_seed: u64) -> BaseChunk {
     let mut voxels = BaseChunk::new();
 
     let mut noise = FastNoise::seeded(world_seed);
@@ -100,9 +100,9 @@ pub fn generate_chunk(chunk_position: IVec3, world_seed: u64) -> BaseChunk {
     for x in 0..CHUNK_SIZE {
         for y in 0..CHUNK_SIZE {
             for z in 0..CHUNK_SIZE {
-                let global_x: i32 = chunk_position.x * CHUNK_SIZE as i32 + x as i32;
-                let global_y: i32 = chunk_position.y * CHUNK_SIZE as i32 + y as i32;
-                let global_z: i32 = chunk_position.z * CHUNK_SIZE as i32 + z as i32;
+                let global_x: i32 = chunk_position.0.x * CHUNK_SIZE as i32 + x as i32;
+                let global_y: i32 = chunk_position.0.y * CHUNK_SIZE as i32 + y as i32;
+                let global_z: i32 = chunk_position.0.z * CHUNK_SIZE as i32 + z as i32;
 
                 let noise_val = noise.get_noise3d(
                     global_x as f32 / 100.,
@@ -155,45 +155,45 @@ pub fn handle_chunk_generation(
     chunk_queue.generate.clear();
 
     while let Ok(chunk) = chunk_channel.0 .1.try_recv() {
-        let chunk_entity = world.get_entity(chunk.position).unwrap();
+        let chunk_position = chunk.position;
+        let chunk_entity = world.get_entity(chunk_position).unwrap();
 
         commands
             .entity(chunk_entity)
             .insert(chunk)
+            .insert(chunk_position)
             .insert(AwaitingMesh);
     }
 }
 
 pub fn handle_chunk_mesh(
     mut commands: Commands,
-    chunks: Query<&ChunkBundle, With<AwaitingMesh>>,
+    chunks: Query<(&ChunkBundle, &ChunkPosition), With<AwaitingMesh>>,
     mut chunk_queue: ResMut<ChunkQueue>,
     world_manager: WorldManager,
     player_chunk: Res<PlayerChunk>,
 ) {
     for (count, chunk) in chunks
         .iter()
-        .sorted_unstable_by_key(|key| {
-            FloatOrd(key.position.as_vec3().distance(player_chunk.0.as_vec3()))
-        })
+        .sorted_unstable_by_key(|key| FloatOrd(key.1.as_vec3().distance(player_chunk.0.as_vec3())))
         .enumerate()
     {
-        if count > 5 {
+        if count > 1 {
             return;
         }
 
-        if world_manager.world.check_neighbors(chunk.position) {
-            if let Some(neighbors) = world_manager.neighboring_chunks(chunk.position) {
-                if let Ok(neighbors) = neighbors.try_into() {
+        if world_manager.world.check_neighbors(*chunk.1) {
+            let neighbors = world_manager.neighboring_chunks(*chunk.1);
+
+            if let Ok(neighbors) = neighbors.try_into() {
+                if let Some(chunk_entity) = world_manager.world.get_entity(*chunk.1) {
                     chunk_queue.await_mesh.push((
-                        chunk.position,
-                        chunk.data.clone(),
+                        *chunk.1,
+                        chunk.0.data.clone(),
                         Box::new(neighbors),
                     ));
 
-                    if let Some(chunk_entity) = world_manager.world.get_entity(chunk.position) {
-                        commands.entity(chunk_entity).remove::<AwaitingMesh>();
-                    }
+                    commands.entity(chunk_entity).remove::<AwaitingMesh>();
                 }
             }
         }
@@ -241,7 +241,7 @@ pub fn build_chunk_mesh(
     }
 }
 
-pub fn generate_final_mesh<C, T>(chunk: &C, chunk_position: IVec3) -> MeshedChunk
+pub fn generate_final_mesh<C, T>(chunk: &C, chunk_position: ChunkPosition) -> MeshedChunk
 where
     C: Chunk<Output = T>,
     T: Voxel,
