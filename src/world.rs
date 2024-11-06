@@ -21,6 +21,8 @@ fn setup(
     // The world model camera will render the floor and the cubes spawned in this system.
     // Assigning no `RenderLayers` component defaults to layer 0.
 
+    // create simple grid first
+    // TODO: Learn how to implement LOD
     for x in 0..16 {
         for y in 0..16 {
             for z in 0..16 {
