@@ -1,5 +1,7 @@
 pub mod camera;
+pub mod chunk;
 pub mod voxel;
+pub mod world;
 
 use bevy::{
     dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin},
@@ -7,10 +9,7 @@ use bevy::{
     text::FontSmoothing,
 };
 
-use crate::{
-    camera::PlayerCameraPlugin,
-    voxel::{Chunk, Voxel},
-};
+use crate::{camera::PlayerCameraPlugin, chunk::Chunk, voxel::Voxel, world::WorldPlugin};
 
 fn main() {
     App::new()
@@ -36,8 +35,9 @@ fn main() {
             },
         ))
         .add_plugins(PlayerCameraPlugin)
+        .add_plugins(WorldPlugin)
         .add_systems(Startup, setup_environment)
-        .add_systems(Startup, spawn_test_chunk)
+        .add_systems(Startup, spawn_chunk_meshes)
         .run();
 }
 
@@ -57,34 +57,50 @@ fn setup_environment(
             shadows_enabled: true,
             ..default()
         },
-        Transform::from_xyz(4.0, 8.0, 4.0),
+        Transform::from_xyz(4.0, 50.0, 4.0),
     ));
 }
 
-fn spawn_test_chunk(
+fn spawn_chunk_meshes(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut world: ResMut<world::World>,
 ) {
-    // Create a new chunk at origin
-    let mut chunk = Chunk::new(IVec3::ZERO);
+    let mut chunk1 = Chunk::new(IVec3::new(0, 0, 0));
+    chunk1.set_voxel(Voxel::Stone, 0, 0, 0);
+    chunk1.set_voxel(Voxel::Stone, 1, 0, 0);
+    chunk1.set_voxel(Voxel::Stone, 31, 0, 0);
 
-    // Add some test voxels to create a small structure
-    // Bottom layer (y=0)
-    chunk.set_voxel(Voxel::Dirt, 0, 0, 0);
-    chunk.set_voxel(Voxel::Dirt, 1, 0, 0);
-    chunk.set_voxel(Voxel::Dirt, 0, 0, 1);
-    chunk.set_voxel(Voxel::Dirt, 1, 0, 1);
+    let mut chunk2 = Chunk::new(IVec3::new(1, 0, 0));
+    chunk2.set_voxel(Voxel::Grass, 0, 0, 0);
 
-    chunk.set_voxel(Voxel::Dirt, 4, 0, 0);
+    world.add_chunk(IVec3::new(0, 0, 0), chunk1);
+    world.add_chunk(IVec3::new(1, 0, 0), chunk2);
 
-    // Generate mesh from voxel data
-    let mesh = chunk.generate_mesh();
+    if let Some(chunk) = world.get_chunk(&IVec3::new(0, 0, 0)) {
+        let (mesh, _stats) = chunk.generate_mesh_with_stats(&world);
 
-    // Spawn the chunk as a renderable entity
-    commands.spawn((
-        Mesh3d(meshes.add(mesh)),
-        MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))), // Brownish color
-        Transform::from_xyz(0.0, 0.0, 0.0),
-    ));
+        commands.spawn((
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                ..default()
+            })),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+        ));
+    }
+
+    if let Some(chunk) = world.get_chunk(&IVec3::new(1, 0, 0)) {
+        let (mesh, _stats) = chunk.generate_mesh_with_stats(&world);
+
+        commands.spawn((
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                ..default()
+            })),
+            Transform::from_xyz(1.0 * 32.0, 0.0, 0.0),
+        ));
+    }
 }
