@@ -7,42 +7,42 @@ use bevy::{
 const FACE_INDICES: [u32; 6] = [0, 3, 1, 1, 3, 2];
 
 const FACE_VERTICES: [[[f32; 3]; 4]; 6] = [
-    // PosX face (right) - viewed from outside, clockwise
+    // PosX face (right)
     [
         [1.0, 0.0, 1.0],
         [1.0, 1.0, 1.0],
         [1.0, 1.0, 0.0],
         [1.0, 0.0, 0.0],
     ],
-    // NegX face (left) - viewed from outside, clockwise
+    // NegX face (left)
     [
         [0.0, 0.0, 0.0],
         [0.0, 1.0, 0.0],
         [0.0, 1.0, 1.0],
         [0.0, 0.0, 1.0],
     ],
-    // PosY face (top) - viewed from above, clockwise
+    // PosY face (top)
     [
         [0.0, 1.0, 0.0],
         [1.0, 1.0, 0.0],
         [1.0, 1.0, 1.0],
         [0.0, 1.0, 1.0],
     ],
-    // NegY face (bottom) - viewed from below, clockwise
+    // NegY face (bottom)
     [
         [1.0, 0.0, 1.0],
         [1.0, 0.0, 0.0],
         [0.0, 0.0, 0.0],
         [0.0, 0.0, 1.0],
     ],
-    // PosZ face (front) - viewed from front, clockwise
+    // PosZ face (front)
     [
         [0.0, 0.0, 1.0],
         [0.0, 1.0, 1.0],
         [1.0, 1.0, 1.0],
         [1.0, 0.0, 1.0],
     ],
-    // NegZ face (back) - viewed from back, clockwise
+    // NegZ face (back)
     [
         [1.0, 0.0, 0.0],
         [1.0, 1.0, 0.0],
@@ -78,6 +78,19 @@ enum FaceDirection {
     NegY,
     PosZ,
     NegZ,
+}
+
+impl FaceDirection {
+    fn face(&self) -> [[f32; 3]; 4] {
+        match self {
+            FaceDirection::PosX => FACE_VERTICES[0],
+            FaceDirection::NegX => FACE_VERTICES[1],
+            FaceDirection::PosY => FACE_VERTICES[2],
+            FaceDirection::NegY => FACE_VERTICES[3],
+            FaceDirection::PosZ => FACE_VERTICES[4],
+            FaceDirection::NegZ => FACE_VERTICES[5],
+        }
+    }
 }
 
 impl Chunk {
@@ -185,7 +198,6 @@ impl Chunk {
                 FaceDirection::NegX,
             );
         }
-
         if !self.get_neighbor_voxel(x, y + 1, z).is_solid() {
             self.add_cube_face_to_mesh(
                 vertices,
@@ -208,7 +220,6 @@ impl Chunk {
                 FaceDirection::NegY,
             );
         }
-
         if !self.get_neighbor_voxel(x, y, z + 1).is_solid() {
             self.add_cube_face_to_mesh(
                 vertices,
@@ -258,8 +269,7 @@ impl Chunk {
         z: f32,
         face_direction: FaceDirection,
     ) {
-        let face_index = face_direction as usize;
-        let face_verts = &FACE_VERTICES[face_index];
+        let face_verts = face_direction.face();
 
         for vertex in face_verts.iter() {
             vertices.push([
