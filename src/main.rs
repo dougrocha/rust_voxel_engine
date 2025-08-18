@@ -87,7 +87,7 @@ fn spawn_chunk_meshes(
                 base_color: Color::WHITE,
                 ..default()
             })),
-            Transform::from_xyz(0.0, 0.0, 0.0),
+            chunk.get_world_transform(),
         ));
     }
 
@@ -100,7 +100,7 @@ fn spawn_chunk_meshes(
                 base_color: Color::WHITE,
                 ..default()
             })),
-            Transform::from_xyz(1.0 * 32.0, 0.0, 0.0),
+            chunk.get_world_transform(),
         ));
     }
 }

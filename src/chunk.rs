@@ -165,7 +165,7 @@ impl Chunk {
             self.position.z * Self::SIZE as i32 + z,
         );
 
-        world.get_voxel(&world_pos.into())
+        world.get_voxel(&world_pos)
     }
 
     fn add_cube_face_to_mesh(
@@ -200,6 +200,14 @@ impl Chunk {
         }
 
         *vertex_count += 4;
+    }
+
+    pub fn get_world_transform(&self) -> Transform {
+        Transform::from_xyz(
+            self.position.x as f32 * Self::SIZE as f32,
+            self.position.y as f32 * Self::SIZE as f32,
+            self.position.z as f32 * Self::SIZE as f32,
+        )
     }
 }
 
