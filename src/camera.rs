@@ -170,7 +170,8 @@ fn cursor_lock_system(
 pub fn setup_camera(mut commands: Commands) {
     commands
         .spawn(Camera3d::default())
-        .insert(PlayerCamera::default());
+        .insert(PlayerCamera::default())
+        .insert(Transform::from_xyz(80.0, 50.0, 90.0));
 }
 
 pub struct PlayerCameraPlugin;

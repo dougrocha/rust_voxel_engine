@@ -15,6 +15,8 @@ pub enum Voxel {
     Dirt,
     Grass,
     Stone,
+    Sand,
+    SandStone,
 }
 
 pub struct VoxelMaterial {
@@ -37,6 +39,12 @@ impl Voxel {
             },
             Voxel::Stone => VoxelMaterial {
                 color: Color::srgb(0.60, 0.60, 0.60),
+            },
+            Voxel::Sand => VoxelMaterial {
+                color: Color::srgb(0.93, 0.86, 0.51),
+            },
+            Voxel::SandStone => VoxelMaterial {
+                color: Color::srgb(0.76, 0.70, 0.50),
             },
         }
     }

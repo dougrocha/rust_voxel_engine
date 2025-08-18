@@ -4,16 +4,36 @@ use bevy::{asset::RenderAssetUsages, prelude::*, render::mesh::Indices};
 
 use crate::{
     voxel::{MeshStats, Voxel},
-    world::World,
+    world::WorldManager,
 };
 
+#[derive(Component)]
+pub struct NeedsRemesh;
+
+#[derive(Component)]
+pub struct NeedsDespawn;
+
+#[derive(Component)]
 pub struct Chunk {
-    pub position: IVec3,
-    pub voxels: [Voxel; Chunk::SIZE * Chunk::SIZE * Chunk::SIZE],
-    pub dirty: bool,
+    pub(crate) entity: Entity,
+    pub(crate) position: IVec3,
 }
 
 impl Chunk {
+    pub fn new(position: IVec3, entity: Entity) -> Self {
+        Self { entity, position }
+    }
+}
+
+#[derive(Clone)]
+pub struct ChunkData {
+    entity: Entity,
+    pub position: IVec3,
+    pub voxels: [Voxel; ChunkData::SIZE * ChunkData::SIZE * ChunkData::SIZE],
+    pub dirty: bool,
+}
+
+impl ChunkData {
     pub const SIZE: usize = 32;
 
     pub fn new(position: IVec3) -> Self {
@@ -21,7 +41,13 @@ impl Chunk {
             voxels: [Voxel::Air; Self::SIZE * Self::SIZE * Self::SIZE],
             position,
             dirty: false,
+            entity: Entity::PLACEHOLDER,
         }
+    }
+
+    pub fn with_entity(position: IVec3, entity: Entity) -> ChunkData {
+        let new = Self::new(position);
+        Self { entity, ..new }
     }
 
     fn index(x: usize, y: usize, z: usize) -> usize {
@@ -38,7 +64,7 @@ impl Chunk {
         self.dirty = true;
     }
 
-    pub fn generate_mesh(&self, world: &World) -> Mesh {
+    pub fn generate_mesh(&self, world: &WorldManager) -> Mesh {
         let mut vertices: Vec<[f32; 3]> = Vec::new();
         let mut colors: Vec<[f32; 4]> = Vec::new();
         let mut indices: Vec<u32> = Vec::new();
@@ -69,7 +95,7 @@ impl Chunk {
         self.create_bevy_mesh(vertices, colors, indices)
     }
 
-    pub fn generate_mesh_with_stats(&self, world: &World) -> (Mesh, MeshStats) {
+    pub fn generate_mesh_with_stats(&self, world: &WorldManager) -> (Mesh, MeshStats) {
         let start = Instant::now();
 
         let mesh = self.generate_mesh(world);
@@ -121,7 +147,7 @@ impl Chunk {
         y: i32,
         z: i32,
         voxel: Voxel,
-        world: &World,
+        world: &WorldManager,
     ) {
         let fx = x as f32;
         let fy = y as f32;
@@ -148,7 +174,7 @@ impl Chunk {
         }
     }
 
-    fn get_neighbor_voxel(&self, x: i32, y: i32, z: i32, world: &World) -> Voxel {
+    fn get_neighbor_voxel(&self, x: i32, y: i32, z: i32, world: &WorldManager) -> Voxel {
         if x >= 0
             && y >= 0
             && z >= 0
