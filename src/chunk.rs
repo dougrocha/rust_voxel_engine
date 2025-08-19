@@ -1,14 +1,63 @@
-use std::time::Instant;
+use std::sync::{Arc, RwLock};
 
-use bevy::{asset::RenderAssetUsages, prelude::*, render::mesh::Indices};
+use bevy::{asset::RenderAssetUsages, prelude::*, render::mesh::Indices, tasks::Task};
 
 use crate::{
-    voxel::{MeshStats, Voxel},
-    world::WorldManager,
+    terrain::TerrainGenerator,
+    voxel::Voxel,
+    world::{ChunkMap, WorldManager},
 };
 
 #[derive(Component)]
-pub struct NeedsRemesh;
+pub struct ChunkThread {
+    pub thread: Task<ChunkTask>,
+}
+
+pub struct ChunkTask {
+    pub position: IVec3,
+    pub entity: Entity,
+    pub chunk_data: ChunkData,
+    pub mesh: Option<Mesh>,
+}
+
+impl ChunkTask {
+    pub fn new(position: IVec3, entity: Entity) -> Self {
+        Self {
+            position,
+            entity,
+            chunk_data: ChunkData::with_entity(position, entity),
+            mesh: None,
+        }
+    }
+
+    pub fn generate(&mut self) {
+        let terrain_generator = TerrainGenerator::new(12345);
+
+        for x in 0..ChunkData::SIZE {
+            for z in 0..ChunkData::SIZE {
+                for y in 0..ChunkData::SIZE {
+                    let voxel = terrain_generator.get_voxel(IVec3::new(
+                        (self.position.x * ChunkData::SIZE as i32) + x as i32,
+                        (self.position.y * ChunkData::SIZE as i32) + y as i32,
+                        (self.position.z * ChunkData::SIZE as i32) + z as i32,
+                    ));
+                    self.chunk_data.set_voxel(voxel, x, y, z);
+                }
+            }
+        }
+    }
+
+    pub fn mesh(&mut self, chunk_map: Arc<RwLock<ChunkMap>>) {
+        let lock = chunk_map.read().expect("Failed to acquire read lock");
+        self.mesh = Some(self.chunk_data.generate_mesh(&lock));
+    }
+}
+
+#[derive(Component)]
+pub struct NeedsMesh;
+
+#[derive(Component)]
+pub struct MeshInProgress;
 
 #[derive(Component)]
 pub struct NeedsDespawn;
@@ -64,7 +113,7 @@ impl ChunkData {
         self.dirty = true;
     }
 
-    pub fn generate_mesh(&self, world: &WorldManager) -> Mesh {
+    pub fn generate_mesh(&self, chunk_map: &ChunkMap) -> Mesh {
         let mut vertices: Vec<[f32; 3]> = Vec::new();
         let mut colors: Vec<[f32; 4]> = Vec::new();
         let mut indices: Vec<u32> = Vec::new();
@@ -85,7 +134,7 @@ impl ChunkData {
                             y as i32,
                             z as i32,
                             voxel,
-                            world,
+                            chunk_map,
                         );
                     }
                 }
@@ -95,21 +144,21 @@ impl ChunkData {
         self.create_bevy_mesh(vertices, colors, indices)
     }
 
-    pub fn generate_mesh_with_stats(&self, world: &WorldManager) -> (Mesh, MeshStats) {
-        let start = Instant::now();
-
-        let mesh = self.generate_mesh(world);
-
-        let stats = MeshStats {
-            vertex_count: mesh.count_vertices(),
-            triangle_count: mesh.triangles().iter().len(),
-            generated_time_ms: start.elapsed().as_secs_f32() * 1000.0,
-            algorithm: "Face Culling".to_string(),
-            ..Default::default()
-        };
-
-        (mesh, stats)
-    }
+    // pub fn generate_mesh_with_stats(&self, world: &WorldManager) -> (Mesh, MeshStats) {
+    //     let start = Instant::now();
+    //
+    //     let mesh = self.generate_mesh(world);
+    //
+    //     let stats = MeshStats {
+    //         vertex_count: mesh.count_vertices(),
+    //         triangle_count: mesh.triangles().iter().len(),
+    //         generated_time_ms: start.elapsed().as_secs_f32() * 1000.0,
+    //         algorithm: "Face Culling".to_string(),
+    //         ..Default::default()
+    //     };
+    //
+    //     (mesh, stats)
+    // }
 
     fn create_bevy_mesh(
         &self,
@@ -147,7 +196,7 @@ impl ChunkData {
         y: i32,
         z: i32,
         voxel: Voxel,
-        world: &WorldManager,
+        chunk_map: &ChunkMap,
     ) {
         let fx = x as f32;
         let fy = y as f32;
@@ -158,7 +207,7 @@ impl ChunkData {
             let y = y + offset.y;
             let z = z + offset.z;
 
-            if !self.get_neighbor_voxel(x, y, z, world).is_solid() {
+            if !self.get_neighbor_voxel(x, y, z, chunk_map).is_solid() {
                 self.add_cube_face_to_mesh(
                     vertices,
                     colors,
@@ -174,7 +223,7 @@ impl ChunkData {
         }
     }
 
-    fn get_neighbor_voxel(&self, x: i32, y: i32, z: i32, world: &WorldManager) -> Voxel {
+    fn get_neighbor_voxel(&self, x: i32, y: i32, z: i32, chunk_map: &ChunkMap) -> Voxel {
         if x >= 0
             && y >= 0
             && z >= 0
@@ -191,7 +240,18 @@ impl ChunkData {
             self.position.z * Self::SIZE as i32 + z,
         );
 
-        world.get_voxel(&world_pos)
+        let chunk_pos = WorldManager::world_to_chunk_pos(&world_pos);
+        let local_pos = WorldManager::world_to_local_pos(&world_pos);
+
+        if let Some(chunk) = chunk_map.get(&chunk_pos) {
+            chunk.get_voxel(
+                local_pos.x as usize,
+                local_pos.y as usize,
+                local_pos.z as usize,
+            )
+        } else {
+            Voxel::Air // No chunk exists here
+        }
     }
 
     fn add_cube_face_to_mesh(
